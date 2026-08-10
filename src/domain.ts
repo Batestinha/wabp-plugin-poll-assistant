@@ -17,6 +17,11 @@ const nonNegativeSafeIntegerSchema = safeIntegerSchema.refine(
   'Must be non-negative'
 );
 
+export const countUnitSchema = z.string()
+  .trim()
+  .min(1)
+  .refine((value) => Array.from(value).length <= 100, 'Must contain at most 100 Unicode code points');
+
 export const pollOptionSchema = z.object({
   id: stableIdSchema,
   label: z.string().trim().min(1),
@@ -92,7 +97,7 @@ export const measureRuleSchema = z.discriminatedUnion('kind', [
 
 export const countRuleSchema = z.object({
   kind: z.literal('sum'),
-  unit: z.string().trim().min(1).max(100)
+  unit: countUnitSchema
 }).strict();
 
 const definitionBase = {
@@ -357,7 +362,7 @@ export const countPollResultSchema = z.object({
     z.object({
       status: z.literal('counted'),
       total: safeIntegerSchema,
-      unit: z.string().trim().min(1).max(100)
+      unit: countUnitSchema
     }).strict()
   ])
 }).strict();

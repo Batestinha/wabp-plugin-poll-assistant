@@ -35,12 +35,21 @@ export type PollRoundStatus =
   | 'tie_pending'
   | 'cancelled'
   | 'failed';
+export type PollPublicationOutcome = 'not_attempted' | 'unknown' | 'accepted';
 export type PollDeliveryStatus = 'pending' | 'sending' | 'sent' | 'uncertain';
 export type PollDeliveryKind = 'result' | 'tie' | 'cancelled' | 'failure';
 
 export const POLL_PUBLICATION_LEASE_MS = 2 * 60 * 1_000;
 export const POLL_FINALIZATION_LEASE_MS = 2 * 60 * 1_000;
 export const POLL_DELIVERY_LEASE_MS = 2 * 60 * 1_000;
+
+export class PollActiveLimitReachedError extends Error {
+  override readonly name = 'PollActiveLimitReachedError';
+}
+
+export class PollTieResultDeliveryPendingError extends Error {
+  override readonly name = 'PollTieResultDeliveryPendingError';
+}
 
 export interface CreatePollInput {
   definition: PollDefinition;
@@ -74,6 +83,7 @@ export interface StoredPollRound {
   publicationNextAttemptAt?: string | undefined;
   electorateCapturedAt?: string | undefined;
   publicationStartedAt?: string | undefined;
+  publicationOutcome: PollPublicationOutcome;
   finalizationClaimToken?: string | undefined;
   finalizationLeaseExpiresAt?: string | undefined;
   finalizationNextAttemptAt?: string | undefined;
@@ -192,6 +202,7 @@ interface PollRow extends PluginDatabaseRow {
   cancelled_by_wid: string | null;
   cancel_reason: string | null;
   ballots_purged_at: string | null;
+  cleanup_next_review_at: string | null;
   last_error: string | null;
 }
 
@@ -212,6 +223,7 @@ interface PollRoundRow extends PluginDatabaseRow {
   publication_next_attempt_at: string | null;
   electorate_captured_at: string | null;
   publication_started_at: string | null;
+  publication_outcome: PollPublicationOutcome;
   finalization_attempt: number;
   finalization_claim_token: string | null;
   finalization_lease_expires_at: string | null;
@@ -305,7 +317,7 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
       chatId
     )?.count ?? 0;
     if (activeCount >= input.maxActivePollsPerChat) {
-      throw new Error(`Chat ${chatId} has reached its active poll limit.`);
+      throw new PollActiveLimitReachedError(`Chat ${chatId} has reached its active poll limit.`);
     }
     db.run(
       `INSERT INTO polls (
@@ -445,9 +457,17 @@ export function cancelPoll(db: PluginDatabase, input: {
     if (!round) {
       return false;
     }
-    if (round.status === 'publishing') {
+    if (round.status === 'publishing' || round.status === 'finalizing') {
       return false;
     }
+    if (
+      round.status === 'open'
+      && round.closes_at
+      && Date.parse(round.closes_at) <= Date.parse(cancelledAt)
+    ) {
+      return false;
+    }
+    requireTieResultDeliverySent(db, round);
     const updated = db.run(
       `UPDATE polls
           SET status = 'cancelled', cancelled_at = ?, cancelled_by_identity_id = ?,
@@ -484,21 +504,83 @@ export function listPollCleanupCandidateIds(db: PluginDatabase, input: {
 }): string[] {
   const terminalBefore = timestampSchema.parse(input.terminalBefore);
   return db.all<{ id: string }>(
-    `SELECT p.id
-       FROM polls p
-      WHERE p.status IN ('resolved', 'cancelled', 'failed')
-        AND p.ballots_purged_at IS NULL
-        AND julianday(COALESCE(p.resolved_at, p.cancelled_at, p.updated_at)) <= julianday(?)
-        AND EXISTS (SELECT 1 FROM poll_deliveries d WHERE d.poll_id = p.id)
-        AND NOT EXISTS (
-          SELECT 1 FROM poll_deliveries d
-           WHERE d.poll_id = p.id AND d.status <> 'sent'
-        )
-      ORDER BY COALESCE(p.resolved_at, p.cancelled_at, p.updated_at) ASC, p.id ASC
+    `WITH terminal_polls AS (
+       SELECT p.id,
+              COALESCE(p.resolved_at, p.cancelled_at, p.updated_at) AS terminal_at,
+              (SELECT MAX(d.sent_at) FROM poll_deliveries d WHERE d.poll_id = p.id) AS latest_delivery_at
+         FROM polls p
+        WHERE p.status IN ('resolved', 'cancelled', 'failed')
+          AND p.ballots_purged_at IS NULL
+          AND (
+            p.cleanup_next_review_at IS NULL
+            OR julianday(p.cleanup_next_review_at) <= julianday(?)
+          )
+          AND EXISTS (SELECT 1 FROM poll_deliveries d WHERE d.poll_id = p.id)
+          AND NOT EXISTS (
+            SELECT 1 FROM poll_deliveries d
+             WHERE d.poll_id = p.id AND d.status <> 'sent'
+          )
+     ), anchored AS (
+       SELECT id,
+              CASE
+                WHEN julianday(latest_delivery_at) > julianday(terminal_at) THEN latest_delivery_at
+                ELSE terminal_at
+              END AS retention_anchor
+         FROM terminal_polls
+     )
+     SELECT anchored.id
+       FROM anchored
+      WHERE julianday(retention_anchor) <= julianday(?)
+      ORDER BY retention_anchor ASC, anchored.id ASC
       LIMIT ?`,
+    terminalBefore,
     terminalBefore,
     normalizedLimit(input.limit)
   ).map((row) => row.id);
+}
+
+export function markPollCleanupReview(db: PluginDatabase, input: {
+  pollId: string;
+  nextReviewAt: string;
+}): boolean {
+  const pollId = required(input.pollId, 'pollId');
+  const nextReviewAt = timestampSchema.parse(input.nextReviewAt);
+  const updated = db.run(
+    `UPDATE polls
+        SET cleanup_next_review_at = ?
+      WHERE id = ?
+        AND status IN ('resolved', 'cancelled', 'failed')
+        AND ballots_purged_at IS NULL`,
+    nextReviewAt,
+    pollId
+  );
+  return updated.changes === 1;
+}
+
+export function getPollRetentionAnchor(db: PluginDatabase, pollIdInput: string): string | undefined {
+  const pollId = required(pollIdInput, 'pollId');
+  const row = db.get<{ retention_anchor: string }>(
+    `WITH terminal_poll AS (
+       SELECT COALESCE(p.resolved_at, p.cancelled_at, p.updated_at) AS terminal_at,
+              (SELECT MAX(d.sent_at) FROM poll_deliveries d WHERE d.poll_id = p.id) AS latest_delivery_at
+         FROM polls p
+        WHERE p.id = ?
+          AND p.status IN ('resolved', 'cancelled', 'failed')
+          AND p.ballots_purged_at IS NULL
+          AND EXISTS (SELECT 1 FROM poll_deliveries d WHERE d.poll_id = p.id)
+          AND NOT EXISTS (
+            SELECT 1 FROM poll_deliveries d
+             WHERE d.poll_id = p.id AND d.status <> 'sent'
+          )
+     )
+     SELECT CASE
+              WHEN julianday(latest_delivery_at) > julianday(terminal_at) THEN latest_delivery_at
+              ELSE terminal_at
+            END AS retention_anchor
+       FROM terminal_poll`,
+    pollId
+  );
+  return row ? timestampSchema.parse(row.retention_anchor) : undefined;
 }
 
 export function purgePollBallotData(db: PluginDatabase, input: {
@@ -511,16 +593,27 @@ export function purgePollBallotData(db: PluginDatabase, input: {
   const purgedAt = timestampSchema.parse(input.purgedAt);
   return db.transaction(() => {
     const eligible = db.get(
-      `SELECT 1 FROM polls p
-        WHERE p.id = ?
-          AND p.status IN ('resolved', 'cancelled', 'failed')
-          AND p.ballots_purged_at IS NULL
-          AND julianday(COALESCE(p.resolved_at, p.cancelled_at, p.updated_at)) <= julianday(?)
-          AND EXISTS (SELECT 1 FROM poll_deliveries d WHERE d.poll_id = p.id)
-          AND NOT EXISTS (
-            SELECT 1 FROM poll_deliveries d
-             WHERE d.poll_id = p.id AND d.status <> 'sent'
-          )`,
+      `WITH terminal_poll AS (
+         SELECT COALESCE(p.resolved_at, p.cancelled_at, p.updated_at) AS terminal_at,
+                (SELECT MAX(d.sent_at) FROM poll_deliveries d WHERE d.poll_id = p.id) AS latest_delivery_at
+           FROM polls p
+          WHERE p.id = ?
+            AND p.status IN ('resolved', 'cancelled', 'failed')
+            AND p.ballots_purged_at IS NULL
+            AND EXISTS (SELECT 1 FROM poll_deliveries d WHERE d.poll_id = p.id)
+            AND NOT EXISTS (
+              SELECT 1 FROM poll_deliveries d
+               WHERE d.poll_id = p.id AND d.status <> 'sent'
+            )
+       )
+       SELECT 1
+         FROM terminal_poll
+        WHERE julianday(
+          CASE
+            WHEN julianday(latest_delivery_at) > julianday(terminal_at) THEN latest_delivery_at
+            ELSE terminal_at
+          END
+        ) <= julianday(?)`,
       pollId,
       terminalBefore
     );
@@ -538,7 +631,8 @@ export function purgePollBallotData(db: PluginDatabase, input: {
     }
     db.run('DELETE FROM poll_electorate WHERE poll_id = ?', pollId);
     const updated = db.run(
-      `UPDATE polls SET ballots_purged_at = ?, updated_at = ?
+      `UPDATE polls
+          SET ballots_purged_at = ?, cleanup_next_review_at = NULL, updated_at = ?
         WHERE id = ? AND ballots_purged_at IS NULL`,
       purgedAt,
       purgedAt,
@@ -595,6 +689,39 @@ export function claimPollRoundPublication(db: PluginDatabase, input: {
   });
 }
 
+/**
+ * Extends an unexpired publication claim with compare-and-swap semantics.
+ *
+ * An expired token is never revived: once its lease reaches the cutoff, the
+ * worker has lost authority to cross the provider mutation boundary even when
+ * no successor has claimed the round yet.
+ */
+export function renewPollRoundPublicationClaim(db: PluginDatabase, input: {
+  roundId: string;
+  claimToken: string;
+  now: string;
+  leaseExpiresAt: string;
+}): boolean {
+  const now = timestampSchema.parse(input.now);
+  const leaseExpiresAt = timestampSchema.parse(input.leaseExpiresAt);
+  if (Date.parse(leaseExpiresAt) <= Date.parse(now)) {
+    throw new Error('Renewed publication lease must expire after renewal.');
+  }
+  const renewed = db.run(
+    `UPDATE poll_rounds
+        SET publication_lease_expires_at = ?, updated_at = ?
+      WHERE id = ? AND status = 'publishing' AND publication_claim_token = ?
+        AND poll_wa_message_id IS NULL
+        AND julianday(publication_lease_expires_at) > julianday(?)`,
+    leaseExpiresAt,
+    now,
+    required(input.roundId, 'roundId'),
+    required(input.claimToken, 'claimToken'),
+    now
+  );
+  return renewed.changes === 1;
+}
+
 export function reschedulePollRoundPublication(db: PluginDatabase, input: {
   roundId: string;
   claimToken: string;
@@ -617,6 +744,85 @@ export function reschedulePollRoundPublication(db: PluginDatabase, input: {
     required(input.claimToken, 'claimToken')
   );
   return result.changes === 1;
+}
+
+export function reschedulePollRoundPublicationUncertain(db: PluginDatabase, input: {
+  roundId: string;
+  claimToken: string;
+  nextAttemptAt: string;
+  error: string;
+  updatedAt: string;
+}): boolean {
+  const nextAttemptAt = timestampSchema.parse(input.nextAttemptAt);
+  const updatedAt = timestampSchema.parse(input.updatedAt);
+  const result = db.run(
+    `UPDATE poll_rounds
+        SET status = 'publish_pending', publication_claim_token = NULL,
+            publication_lease_expires_at = NULL, publication_next_attempt_at = ?,
+            publication_outcome = 'unknown', updated_at = ?, last_error = ?
+      WHERE id = ? AND status = 'publishing' AND publication_claim_token = ?
+        AND poll_wa_message_id IS NULL`,
+    nextAttemptAt,
+    updatedAt,
+    required(input.error, 'error'),
+    required(input.roundId, 'roundId'),
+    required(input.claimToken, 'claimToken')
+  );
+  return result.changes === 1;
+}
+
+/**
+ * Releases a publication claim after the transport proved that no poll was sent.
+ *
+ * Relative deadlines and the frozen electorate are publication-time facts. They
+ * must be captured again on the next real attempt; retaining them across a
+ * definitely-not-sent failure could publish an already-expired poll hours later.
+ */
+export function resetPollRoundPublicationAfterDefiniteNonDelivery(
+  db: PluginDatabase,
+  input: {
+    roundId: string;
+    claimToken: string;
+    nextAttemptAt: string;
+    error: string;
+    updatedAt: string;
+  }
+): boolean {
+  const roundId = required(input.roundId, 'roundId');
+  const claimToken = required(input.claimToken, 'claimToken');
+  const nextAttemptAt = timestampSchema.parse(input.nextAttemptAt);
+  const updatedAt = timestampSchema.parse(input.updatedAt);
+  return db.transaction(() => {
+    const round = db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ?', roundId);
+    if (
+      !round
+      || round.status !== 'publishing'
+      || round.publication_claim_token !== claimToken
+      || round.poll_wa_message_id
+    ) {
+      return false;
+    }
+    db.run('DELETE FROM poll_electorate WHERE poll_id = ?', round.poll_id);
+    const reset = db.run(
+      `UPDATE poll_rounds
+          SET status = 'publish_pending', publication_claim_token = NULL,
+              publication_lease_expires_at = NULL, publication_next_attempt_at = ?,
+              electorate_captured_at = NULL, publication_started_at = NULL,
+              publication_outcome = 'not_attempted',
+              updated_at = ?, last_error = ?
+        WHERE id = ? AND status = 'publishing' AND publication_claim_token = ?
+          AND poll_wa_message_id IS NULL`,
+      nextAttemptAt,
+      updatedAt,
+      required(input.error, 'error'),
+      roundId,
+      claimToken
+    );
+    if (reset.changes !== 1) {
+      throw new Error(`Publication claim for poll round ${roundId} changed while resetting it.`);
+    }
+    return true;
+  });
 }
 
 export function capturePollElectorate(db: PluginDatabase, input: {
@@ -664,10 +870,9 @@ export function capturePollElectorate(db: PluginDatabase, input: {
     });
     const updated = db.run(
       `UPDATE poll_rounds
-          SET electorate_captured_at = ?, publication_started_at = ?, updated_at = ?
+          SET electorate_captured_at = ?, updated_at = ?
         WHERE id = ? AND status = 'publishing' AND publication_claim_token = ?
-          AND electorate_captured_at IS NULL AND publication_started_at IS NULL`,
-      capturedAt,
+          AND electorate_captured_at IS NULL`,
       capturedAt,
       capturedAt,
       roundId,
@@ -677,6 +882,98 @@ export function capturePollElectorate(db: PluginDatabase, input: {
       throw new Error(`Publication claim for poll round ${roundId} was lost.`);
     }
     return electorate;
+  });
+}
+
+/**
+ * Discards an electorate that was captured by a publication worker which
+ * stopped before durably anchoring its first provider invocation.
+ *
+ * No native send can have started while publication_started_at is null, so a
+ * reclaimed worker must take a fresh membership snapshot instead of treating
+ * the abandoned observation as members-at-publication evidence.
+ */
+export function discardUnanchoredPollElectorate(db: PluginDatabase, input: {
+  roundId: string;
+  claimToken: string;
+  updatedAt: string;
+}): boolean {
+  const roundId = required(input.roundId, 'roundId');
+  const claimToken = required(input.claimToken, 'claimToken');
+  const updatedAt = timestampSchema.parse(input.updatedAt);
+  return db.transaction(() => {
+    const round = db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ?', roundId);
+    if (
+      !round
+      || round.status !== 'publishing'
+      || round.publication_claim_token !== claimToken
+      || round.poll_wa_message_id
+    ) {
+      throw new Error(`Publication claim for poll round ${roundId} was lost.`);
+    }
+    if (round.publication_started_at || !round.electorate_captured_at) {
+      return false;
+    }
+    db.run('DELETE FROM poll_electorate WHERE poll_id = ?', round.poll_id);
+    const updated = db.run(
+      `UPDATE poll_rounds
+          SET electorate_captured_at = NULL, updated_at = ?
+        WHERE id = ? AND status = 'publishing' AND publication_claim_token = ?
+          AND electorate_captured_at IS NOT NULL AND publication_started_at IS NULL
+          AND poll_wa_message_id IS NULL`,
+      updatedAt,
+      roundId,
+      claimToken
+    );
+    if (updated.changes !== 1) {
+      throw new Error(`Publication claim for poll round ${roundId} changed while refreshing its electorate.`);
+    }
+    return true;
+  });
+}
+
+/**
+ * Durably anchors the first provider invocation independently from the earlier
+ * electorate observation. The existing value wins on an ambiguous retry so a
+ * later send attempt can never extend a relative voting window.
+ */
+export function startPollRoundPublicationAttempt(db: PluginDatabase, input: {
+  roundId: string;
+  claimToken: string;
+  startedAt: string;
+}): string {
+  const roundId = required(input.roundId, 'roundId');
+  const claimToken = required(input.claimToken, 'claimToken');
+  const startedAt = timestampSchema.parse(input.startedAt);
+  return db.transaction(() => {
+    const round = db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ?', roundId);
+    if (
+      !round
+      || round.status !== 'publishing'
+      || round.publication_claim_token !== claimToken
+      || !round.electorate_captured_at
+      || round.poll_wa_message_id
+    ) {
+      throw new Error(`Publication claim for poll round ${roundId} was lost before provider invocation.`);
+    }
+    if (round.publication_started_at) {
+      return round.publication_started_at;
+    }
+    const updated = db.run(
+      `UPDATE poll_rounds
+          SET publication_started_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'publishing' AND publication_claim_token = ?
+          AND electorate_captured_at IS NOT NULL AND publication_started_at IS NULL
+          AND poll_wa_message_id IS NULL`,
+      startedAt,
+      startedAt,
+      roundId,
+      claimToken
+    );
+    if (updated.changes !== 1) {
+      throw new Error(`Publication claim for poll round ${roundId} changed before provider invocation.`);
+    }
+    return startedAt;
   });
 }
 
@@ -741,9 +1038,14 @@ export function markPollRoundPublished(db: PluginDatabase, input: {
   roundId: string;
   claimToken: string;
   pollWaMessageId: string;
-  publishedAt: string;
+  acceptedAt: string;
+  deadlineAnchorAt?: string | undefined;
 }): boolean {
-  const publishedAt = timestampSchema.parse(input.publishedAt);
+  const acceptedAt = timestampSchema.parse(input.acceptedAt);
+  const deadlineAnchorAt = timestampSchema.parse(input.deadlineAnchorAt ?? acceptedAt);
+  if (Date.parse(deadlineAnchorAt) > Date.parse(acceptedAt)) {
+    throw new Error('A Poll deadline anchor cannot be later than provider acceptance.');
+  }
   const roundId = required(input.roundId, 'roundId');
   const claimToken = required(input.claimToken, 'claimToken');
   return db.transaction(() => {
@@ -763,21 +1065,22 @@ export function markPollRoundPublished(db: PluginDatabase, input: {
     const closesAt = definition.closing.kind === 'deadline'
       && definition.closing.deadline.mode === 'after_publish'
       ? new Date(
-          Date.parse(round.publication_started_at!)
+          Date.parse(deadlineAnchorAt)
             + definition.closing.deadline.durationMinutes * 60_000
         ).toISOString()
       : round.closes_at;
     const result = db.run(
       `UPDATE poll_rounds
           SET status = 'open', poll_wa_message_id = ?, published_at = ?, closes_at = ?,
+              publication_outcome = 'accepted',
               publication_claim_token = NULL, publication_lease_expires_at = NULL,
               publication_next_attempt_at = NULL, updated_at = ?, last_error = NULL
         WHERE id = ? AND status = 'publishing' AND publication_claim_token = ?
           AND poll_wa_message_id IS NULL`,
       required(input.pollWaMessageId, 'pollWaMessageId'),
-      publishedAt,
+      acceptedAt,
       closesAt,
-      publishedAt,
+      acceptedAt,
       roundId,
       claimToken
     );
@@ -1034,10 +1337,13 @@ export function replacePollBallotsFromAuthoritativeReadback(db: PluginDatabase, 
     if (!round.closes_at) {
       throw new Error(`Poll round ${roundId} has no authoritative close cutoff.`);
     }
-    const electorateIds = new Set(db.all<{ voter_identity_id: string }>(
-      'SELECT voter_identity_id FROM poll_electorate WHERE poll_id = ?',
+    const electorateWidByIdentityId = new Map(db.all<{
+      voter_identity_id: string;
+      voter_wid: string;
+    }>(
+      'SELECT voter_identity_id, voter_wid FROM poll_electorate WHERE poll_id = ?',
       round.poll_id
-    ).map((row) => row.voter_identity_id));
+    ).map((row) => [row.voter_identity_id, row.voter_wid]));
     const optionRows = db.all<{ option_id: string; ordinal: number }>(
       `SELECT option_id, ordinal FROM poll_round_options
         WHERE round_id = ? ORDER BY ordinal ASC`,
@@ -1045,7 +1351,7 @@ export function replacePollBallotsFromAuthoritativeReadback(db: PluginDatabase, 
     );
     const ordinalByOptionId = new Map(optionRows.map((row) => [row.option_id, row.ordinal]));
     for (const ballot of ballots) {
-      if (!electorateIds.has(ballot.voterIdentityId)) {
+      if (!electorateWidByIdentityId.has(ballot.voterIdentityId)) {
         throw new Error(`Voter identity ${ballot.voterIdentityId} is not in the captured electorate.`);
       }
       if (ballot.selectedOptionIds.some((optionId) => !ordinalByOptionId.has(optionId))) {
@@ -1062,6 +1368,9 @@ export function replacePollBallotsFromAuthoritativeReadback(db: PluginDatabase, 
       .sort((left, right) => left.voterIdentityId.localeCompare(right.voterIdentityId))
       .map((ballot) => ({
         ...ballot,
+        // Never hash a mutable transport delivery alias. This also fences any
+        // future caller of the store API to the publication-time electorate.
+        voterWid: electorateWidByIdentityId.get(ballot.voterIdentityId)!,
         selectedOptionIds: [...ballot.selectedOptionIds].sort(
           (left, right) => ordinalByOptionId.get(left)! - ordinalByOptionId.get(right)!
         )
@@ -1582,6 +1891,7 @@ export function resolvePollTie(db: PluginDatabase, input: {
     if (!round || round.status !== 'tie_pending') {
       throw new Error(`Poll round ${roundId} is not awaiting a tie resolution.`);
     }
+    requireTieResultDeliverySent(db, round);
     if (input.selectedOptionIds.length !== result.outcome.remainingSeats) {
       throw new Error(`Tie resolution requires exactly ${result.outcome.remainingSeats} option(s).`);
     }
@@ -1617,6 +1927,23 @@ export function resolvePollTie(db: PluginDatabase, input: {
     );
     insertDelivery(db, round.poll_id, roundId, input.delivery, resolvedAt);
   });
+}
+
+function requireTieResultDeliverySent(db: PluginDatabase, round: PollRoundRow): void {
+  if (round.status !== 'tie_pending') {
+    return;
+  }
+  const tieDelivery = db.get<{ status: PollDeliveryStatus }>(
+    `SELECT status FROM poll_deliveries
+      WHERE id = ? AND round_id = ? AND kind = 'tie'`,
+    `poll-result:${round.id}`,
+    round.id
+  );
+  if (tieDelivery?.status !== 'sent') {
+    throw new PollTieResultDeliveryPendingError(
+      `Poll round ${round.id} cannot transition before its tie result is delivered.`
+    );
+  }
 }
 
 function insertDelivery(
@@ -1707,6 +2034,7 @@ function roundFromRow(row: PollRoundRow): StoredPollRound {
       : {}),
     ...(row.electorate_captured_at ? { electorateCapturedAt: row.electorate_captured_at } : {}),
     ...(row.publication_started_at ? { publicationStartedAt: row.publication_started_at } : {}),
+    publicationOutcome: row.publication_outcome,
     finalizationAttempt: row.finalization_attempt,
     ...(row.finalization_claim_token ? { finalizationClaimToken: row.finalization_claim_token } : {}),
     ...(row.finalization_lease_expires_at

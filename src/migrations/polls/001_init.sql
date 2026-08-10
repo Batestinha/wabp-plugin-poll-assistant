@@ -17,10 +17,13 @@ CREATE TABLE polls (
   cancelled_by_wid TEXT,
   cancel_reason TEXT,
   ballots_purged_at TEXT,
+  cleanup_next_review_at TEXT,
   last_error TEXT
 );
 
 CREATE INDEX polls_scope_status_idx ON polls(scope_id, status, created_at, id);
+CREATE INDEX polls_cleanup_recovery_idx
+  ON polls(status, ballots_purged_at, cleanup_next_review_at, updated_at, id);
 
 CREATE TABLE poll_rounds (
   id TEXT PRIMARY KEY,
@@ -41,6 +44,8 @@ CREATE TABLE poll_rounds (
   publication_next_attempt_at TEXT,
   electorate_captured_at TEXT,
   publication_started_at TEXT,
+  publication_outcome TEXT NOT NULL DEFAULT 'not_attempted'
+    CHECK (publication_outcome IN ('not_attempted', 'unknown', 'accepted')),
   finalization_attempt INTEGER NOT NULL DEFAULT 0 CHECK (finalization_attempt >= 0),
   finalization_claim_token TEXT,
   finalization_lease_expires_at TEXT,

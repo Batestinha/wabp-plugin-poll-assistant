@@ -1,15 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
+import { isPluginServiceNotInvokedError } from '../../../platform/pluginRuntime/pluginServices';
 import {
   isDefinitelyNotSentTransportError,
+  isTransportProviderUnavailableError,
   TransportGroupNotFoundError
 } from '../../../platform/transport/transportErrors';
 import {
   DOAS_POLL_PUBLISH_METHOD,
+  DOAS_POLL_RECONCILE_METHOD,
   DOAS_POLL_SERVICE_ID,
   doasPollPublishInputSchema,
-  type DoasPollPublishOutput
+  doasPollReconcileInputSchema,
+  type DoasPollPublishOutput,
+  type DoasPollReconcileOutput
 } from '../doas/serviceApi';
 import type { PollElector } from './domain';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';
@@ -18,12 +23,18 @@ import {
   POLL_PUBLICATION_LEASE_MS,
   capturePollElectorate,
   claimPollRoundPublication,
+  discardUnanchoredPollElectorate,
   failPollRoundPublication,
   getCapturedPollElectorateByRoundId,
+  getPollDelivery,
   getPollLifecycleByRoundId,
   markPollRoundPublished,
   pollsDatabase,
+  resetPollRoundPublicationAfterDefiniteNonDelivery,
+  renewPollRoundPublicationClaim,
   reschedulePollRoundPublication,
+  reschedulePollRoundPublicationUncertain,
+  startPollRoundPublicationAttempt,
   type PollPublicationClaim,
   type StoredPollRoundSnapshot
 } from './store';
@@ -31,7 +42,11 @@ import {
 const PUBLICATION_FAILURE_MESSAGE_KEY = 'official.poll-assistant.failure.publication';
 
 class CanonicalPollPublicationError extends Error {
-  override readonly name = 'CanonicalPollPublicationError';
+  override readonly name: string = 'CanonicalPollPublicationError';
+}
+
+class UnconfirmedPollPublicationError extends CanonicalPollPublicationError {
+  override readonly name = 'UnconfirmedPollPublicationError';
 }
 
 export async function publishPollRound(
@@ -61,22 +76,94 @@ export async function publishPollRound(
     );
     return;
   }
+  let deliveryAttempted = false;
+  let resumedAttempt = false;
 
   try {
-    const snapshot = requireClaimedSnapshot(db, claim);
-    if (!snapshot.round.publicationStartedAt) {
-      requirePublicationDeadlineHasNotPassed(snapshot, clock());
+    const snapshotBeforeCapture = requireClaimedSnapshot(db, claim);
+    resumedAttempt = Boolean(snapshotBeforeCapture.round.publicationStartedAt);
+    if (!resumedAttempt) {
+      requirePublicationDeadlineHasNotPassed(snapshotBeforeCapture, clock());
+      discardUnanchoredPollElectorate(db, {
+        roundId: claim.round.id,
+        claimToken: claim.claimToken,
+        updatedAt: clock().toISOString()
+      });
     }
-    await ensurePublicationElectorate(context, claim, clock);
-    const sendSnapshot = requireClaimedSnapshot(db, claim);
-    const publicationStartedAt = sendSnapshot.round.publicationStartedAt;
-    if (!publicationStartedAt) {
-      throw new Error('Poll electorate capture did not persist its publication timestamp.');
-    }
-    const publishInput = canonicalPublishInput(sendSnapshot);
+    const electorate = await ensurePublicationElectorate(context, claim);
+    let sendSnapshot = requireClaimedSnapshot(db, claim);
+    requireTallyTotalWithinSafeInteger(sendSnapshot, electorate.length);
+    let publicationStartedAt = sendSnapshot.round.publicationStartedAt;
     if (!context.services) {
       throw new Error('Poll publication service registry is unavailable.');
     }
+    const receipt = await context.services.call<DoasPollReconcileOutput>({
+      serviceId: DOAS_POLL_SERVICE_ID,
+      method: DOAS_POLL_RECONCILE_METHOD,
+      scopeId: claim.poll.scopeId,
+      actorIdentityId: claim.poll.creatorIdentityId,
+      ...(claim.poll.groupId ? { groupId: claim.poll.groupId } : {}),
+      groupWid: claim.poll.chatId,
+      input: doasPollReconcileInputSchema.parse({
+        groupWid: sendSnapshot.poll.chatId,
+        idempotencyKey: sendSnapshot.round.publishIdempotencyKey
+      })
+    });
+    if (receipt.status === 'found') {
+      if (!publicationStartedAt) {
+        throw new CanonicalPollPublicationError(
+          'Provider returned a poll receipt without the durable provider-attempt anchor.'
+        );
+      }
+      await persistAcceptedPublication(context, claim, receipt, clock(), {
+        deadlineAnchorAt: conservativePublicationAnchor(
+          publicationStartedAt,
+          receipt.acceptedAt ?? publicationStartedAt
+        )
+      });
+      return;
+    }
+    if (receipt.status === 'unknown') {
+      if (!publicationStartedAt) {
+        throw new UnconfirmedPollPublicationError(
+          'Provider returned an unresolved poll send without the durable provider-attempt anchor.'
+        );
+      }
+      requireUnknownPublicationWindowHasNotExpired(sendSnapshot, clock());
+    }
+    if (receipt.status === 'absent' && publicationStartedAt) {
+      await reschedulePublication(
+        context,
+        claim,
+        new Error('Provider proved that the previous poll publication attempt was absent.'),
+        clock(),
+        { resetPublicationWindow: true }
+      );
+      return;
+    }
+    if (!publicationStartedAt) {
+      publicationStartedAt = startPollRoundPublicationAttempt(db, {
+        roundId: claim.round.id,
+        claimToken: claim.claimToken,
+        startedAt: clock().toISOString()
+      });
+      sendSnapshot = requireClaimedSnapshot(db, claim);
+    }
+    const publishInput = canonicalPublishInput(sendSnapshot);
+    const providerBoundaryAt = clock();
+    if (!renewPollRoundPublicationClaim(db, {
+      roundId: claim.round.id,
+      claimToken: claim.claimToken,
+      now: providerBoundaryAt.toISOString(),
+      leaseExpiresAt: new Date(
+        providerBoundaryAt.getTime() + POLL_PUBLICATION_LEASE_MS
+      ).toISOString()
+    })) {
+      throw new Error(
+        `Publication claim for poll round ${claim.round.id} expired before provider invocation.`
+      );
+    }
+    deliveryAttempted = true;
     const sent = await context.services.call<DoasPollPublishOutput>({
       serviceId: DOAS_POLL_SERVICE_ID,
       method: DOAS_POLL_PUBLISH_METHOD,
@@ -87,36 +174,38 @@ export async function publishPollRound(
       input: publishInput
     });
     const pollWaMessageId = sent?.messageId?.trim();
-    if (!pollWaMessageId) {
-      throw new Error('Poll publication returned no WhatsApp message id.');
+    const acceptedAt = sent?.acceptedAt?.trim();
+    if (!pollWaMessageId || !acceptedAt || Number.isNaN(Date.parse(acceptedAt))) {
+      throw new Error('Poll publication returned no authoritative WhatsApp receipt.');
     }
-    const persisted = markPollRoundPublished(db, {
-      roundId,
-      claimToken: claim.claimToken,
-      pollWaMessageId,
-      publishedAt: publicationStartedAt
-    });
-    if (!persisted) {
-      return;
-    }
-    const published = getPollLifecycleByRoundId(db, roundId);
-    if (published?.round.closesAt) {
-      await enqueuePollFinalizeJob(context, {
-        scopeId: published.poll.scopeId,
-        pollId: published.poll.id,
-        roundId,
-        ...(published.poll.groupId ? { groupId: published.poll.groupId } : {}),
-        groupWid: published.poll.chatId,
-        attempt: published.round.finalizationAttempt,
-        runAt: new Date(published.round.closesAt)
-      });
-    }
+    await persistAcceptedPublication(context, claim, {
+      status: 'found',
+      providerId: 'whatsmeow',
+      messageId: pollWaMessageId,
+      ...(sent.remoteChatId ? { remoteChatId: sent.remoteChatId } : {}),
+      acceptedAt
+    }, clock(), receipt.status === 'unknown'
+      ? { deadlineAnchorAt: conservativePublicationAnchor(publicationStartedAt, acceptedAt) }
+      : undefined);
   } catch (error) {
     if (isTerminalPublicationError(error)) {
       await persistTerminalPublicationFailure(context, claim, error, clock());
       return;
     }
-    await reschedulePublication(context, claim, error, clock());
+    const definitelyNotAttempted = isPluginServiceNotInvokedError(error)
+      || isDefinitelyNotSentTransportError(error)
+      || isTransportProviderUnavailableError(error);
+    if (deliveryAttempted && !definitelyNotAttempted) {
+      await rescheduleUncertainPublication(context, claim, error, clock());
+      return;
+    }
+    if (resumedAttempt) {
+      await rescheduleUncertainPublication(context, claim, error, clock());
+      return;
+    }
+    await reschedulePublication(context, claim, error, clock(), {
+      resetPublicationWindow: !deliveryAttempted || definitelyNotAttempted
+    });
   }
 }
 
@@ -132,6 +221,27 @@ function requirePublicationDeadlineHasNotPassed(
   ) {
     throw new CanonicalPollPublicationError(
       `Poll ${snapshot.poll.id} expired before its first publication attempt.`
+    );
+  }
+}
+
+function requireUnknownPublicationWindowHasNotExpired(
+  snapshot: StoredPollRoundSnapshot,
+  now: Date
+): void {
+  const closing = snapshot.poll.definition.closing;
+  if (closing.kind !== 'deadline') {
+    return;
+  }
+  const uncertaintyHorizon = closing.deadline.mode === 'at'
+    ? Date.parse(closing.deadline.closesAt)
+    : snapshot.round.publicationStartedAt
+      ? Date.parse(snapshot.round.publicationStartedAt)
+        + closing.deadline.durationMinutes * 60_000
+      : undefined;
+  if (uncertaintyHorizon !== undefined && uncertaintyHorizon <= now.getTime()) {
+    throw new UnconfirmedPollPublicationError(
+      `Poll ${snapshot.poll.id} has an unresolved provider send after its anchored publication window.`
     );
   }
 }
@@ -157,6 +267,15 @@ function requireClaimedSnapshot(
 
 function canonicalPublishInput(snapshot: StoredPollRoundSnapshot) {
   try {
+    const closing = snapshot.poll.definition.closing;
+    const relativeNotAfter = closing.kind === 'deadline'
+      && closing.deadline.mode === 'after_publish'
+      && snapshot.round.publicationStartedAt
+      ? new Date(
+          Date.parse(snapshot.round.publicationStartedAt)
+            + closing.deadline.durationMinutes * 60_000
+        ).toISOString()
+      : undefined;
     return doasPollPublishInputSchema.parse({
       groupWid: snapshot.poll.chatId,
       question: snapshot.round.question,
@@ -165,7 +284,13 @@ function canonicalPublishInput(snapshot: StoredPollRoundSnapshot) {
         .map((option) => option.wireLabel),
       allowMultipleAnswers: snapshot.round.allowMultipleAnswers,
       idempotencyKey: snapshot.round.publishIdempotencyKey,
-      sourcePluginId: POLL_ASSISTANT_PLUGIN_ID
+      ...(closing.kind === 'deadline' && closing.deadline.mode === 'at'
+        ? { notAfter: closing.deadline.closesAt }
+        : relativeNotAfter
+          ? { notAfter: relativeNotAfter }
+          : {}),
+      sourcePluginId: POLL_ASSISTANT_PLUGIN_ID,
+      historyHoldOwner: POLL_ASSISTANT_PLUGIN_ID
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -175,10 +300,30 @@ function canonicalPublishInput(snapshot: StoredPollRoundSnapshot) {
   }
 }
 
+function requireTallyTotalWithinSafeInteger(
+  snapshot: StoredPollRoundSnapshot,
+  electorateSize: number
+): void {
+  if (snapshot.poll.definition.purpose !== 'count') {
+    return;
+  }
+  const maximumOptionValue = snapshot.poll.definition.options.reduce(
+    (maximum, option) => Math.max(maximum, option.numericValue ?? 0),
+    0
+  );
+  if (
+    BigInt(maximumOptionValue) * BigInt(electorateSize)
+    > BigInt(Number.MAX_SAFE_INTEGER)
+  ) {
+    throw new CanonicalPollPublicationError(
+      `Poll ${snapshot.poll.id} can exceed the safe Tally total for its frozen electorate.`
+    );
+  }
+}
+
 async function ensurePublicationElectorate(
   context: PluginRuntimeContext,
-  claim: PollPublicationClaim,
-  clock: () => Date
+  claim: PollPublicationClaim
 ): Promise<readonly PollElector[]> {
   const db = pollsDatabase(context.databases);
   const captured = getCapturedPollElectorateByRoundId(db, claim.round.id);
@@ -188,14 +333,21 @@ async function ensurePublicationElectorate(
     }
     return captured;
   }
-  if (!context.getGroupParticipants || !context.resolveIdentityAddress || !context.getCurrentBotWid) {
+  if (!context.getAuthoritativeGroupParticipantSnapshot || !context.resolveIdentityAddress) {
     throw new Error('Authoritative group participant and identity reads are unavailable.');
   }
-  const botWid = (await context.getCurrentBotWid())?.trim();
-  if (!botWid) {
-    throw new Error('The current WhatsApp bot identity is unavailable.');
+  const participantSnapshot = await context.getAuthoritativeGroupParticipantSnapshot(claim.poll.chatId);
+  if (
+    participantSnapshot.providerId !== 'whatsmeow'
+    || Number.isNaN(participantSnapshot.observedAt.getTime())
+  ) {
+    throw new Error('Authoritative group participant snapshot has invalid provider evidence.');
   }
-  const participants = (await context.getGroupParticipants(claim.poll.chatId))
+  const botWid = participantSnapshot.botWid.trim();
+  if (!botWid) {
+    throw new Error('The authoritative group snapshot has no bot identity.');
+  }
+  const participants = participantSnapshot.participants
     .map((participant) => ({ ...participant, wid: participant.wid.trim() }))
     .sort((left, right) => left.wid.localeCompare(right.wid));
   if (participants.some((participant) => !participant.wid)) {
@@ -242,7 +394,7 @@ async function ensurePublicationElectorate(
     roundId: claim.round.id,
     claimToken: claim.claimToken,
     electorate,
-    capturedAt: clock().toISOString()
+    capturedAt: participantSnapshot.observedAt.toISOString()
   });
 }
 
@@ -255,8 +407,61 @@ function isTerminalPublicationError(error: unknown): boolean {
     || error instanceof TransportGroupNotFoundError
     || (
       isDefinitelyNotSentTransportError(error)
-      && (error.code === 'group_not_found' || error.code === 'poll_content_invalid')
+      && (
+        error.code === 'group_not_found'
+        || error.code === 'poll_content_invalid'
+        || error.code === 'send_constraint_expired'
+      )
     );
+}
+
+async function persistAcceptedPublication(
+  context: PluginRuntimeContext,
+  claim: PollPublicationClaim,
+  receipt: DoasPollReconcileOutput,
+  _observedAt: Date,
+  options: { deadlineAnchorAt?: string | undefined } = {}
+): Promise<void> {
+  const pollWaMessageId = receipt.messageId?.trim();
+  const acceptedAt = receipt.acceptedAt?.trim();
+  if (
+    receipt.status !== 'found'
+    || receipt.providerId !== 'whatsmeow'
+    || !pollWaMessageId
+    || !acceptedAt
+    || Number.isNaN(Date.parse(acceptedAt))
+  ) {
+    throw new CanonicalPollPublicationError('Provider returned an invalid authoritative poll receipt.');
+  }
+  const persisted = markPollRoundPublished(pollsDatabase(context.databases), {
+    roundId: claim.round.id,
+    claimToken: claim.claimToken,
+    pollWaMessageId,
+    acceptedAt,
+    ...(options.deadlineAnchorAt ? { deadlineAnchorAt: options.deadlineAnchorAt } : {})
+  });
+  if (!persisted) {
+    return;
+  }
+  const published = getPollLifecycleByRoundId(pollsDatabase(context.databases), claim.round.id);
+  if (!published?.round.closesAt) {
+    return;
+  }
+  await enqueuePollFinalizeJob(context, {
+    scopeId: published.poll.scopeId,
+    pollId: published.poll.id,
+    roundId: published.round.id,
+    ...(published.poll.groupId ? { groupId: published.poll.groupId } : {}),
+    groupWid: published.poll.chatId,
+    attempt: published.round.finalizationAttempt + 1,
+    runAt: new Date(published.round.closesAt)
+  });
+}
+
+function conservativePublicationAnchor(publicationStartedAt: string, acceptedAt: string): string {
+  return Date.parse(publicationStartedAt) <= Date.parse(acceptedAt)
+    ? publicationStartedAt
+    : acceptedAt;
 }
 
 async function persistTerminalPublicationFailure(
@@ -266,6 +471,9 @@ async function persistTerminalPublicationFailure(
   failedAt: Date
 ): Promise<void> {
   const t = await context.i18n.translatorForScope(claim.poll.scopeId);
+  const messageKey = error instanceof UnconfirmedPollPublicationError
+    ? 'official.poll-assistant.failure.publicationUnconfirmed'
+    : PUBLICATION_FAILURE_MESSAGE_KEY;
   const deliveryId = `poll-publication-failure:${claim.round.id}`;
   const persisted = failPollRoundPublication(pollsDatabase(context.databases), {
     roundId: claim.round.id,
@@ -276,7 +484,7 @@ async function persistTerminalPublicationFailure(
       kind: 'failure',
       deliveryKey: `publication-failure:${claim.round.id}:v1`,
       chatId: claim.poll.chatId,
-      text: t(PUBLICATION_FAILURE_MESSAGE_KEY, {
+      text: t(messageKey, {
         question: claim.poll.definition.question,
         pollId: claim.poll.id
       }),
@@ -290,7 +498,7 @@ async function persistTerminalPublicationFailure(
       deliveryId,
       ...(claim.poll.groupId ? { groupId: claim.poll.groupId } : {}),
       groupWid: claim.poll.chatId,
-      attempt: 0
+      attempt: 1
     });
   }
 }
@@ -299,10 +507,14 @@ async function reschedulePublication(
   context: PluginRuntimeContext,
   claim: PollPublicationClaim,
   error: unknown,
-  failedAt: Date
+  failedAt: Date,
+  options: { resetPublicationWindow?: boolean | undefined } = {}
 ): Promise<void> {
   const nextAttemptAt = pollRetryAt(failedAt, claim.round.publicationAttempt);
-  const persisted = reschedulePollRoundPublication(pollsDatabase(context.databases), {
+  const reschedule = options.resetPublicationWindow
+    ? resetPollRoundPublicationAfterDefiniteNonDelivery
+    : reschedulePollRoundPublication;
+  const persisted = reschedule(pollsDatabase(context.databases), {
     roundId: claim.round.id,
     claimToken: claim.claimToken,
     nextAttemptAt: nextAttemptAt.toISOString(),
@@ -316,12 +528,50 @@ async function reschedulePublication(
       roundId: claim.round.id,
       ...(claim.poll.groupId ? { groupId: claim.poll.groupId } : {}),
       groupWid: claim.poll.chatId,
-      attempt: claim.round.publicationAttempt,
+      attempt: claim.round.publicationAttempt + 1,
       runAt: nextAttemptAt
     });
     return;
   }
   await reconcilePublicationSuccessor(context, claim.poll.id, claim.round.id);
+}
+
+async function rescheduleUncertainPublication(
+  context: PluginRuntimeContext,
+  claim: PollPublicationClaim,
+  error: unknown,
+  failedAt: Date
+): Promise<void> {
+  const snapshot = getPollLifecycleByRoundId(pollsDatabase(context.databases), claim.round.id);
+  if (snapshot) {
+    try {
+      requireUnknownPublicationWindowHasNotExpired(snapshot, failedAt);
+    } catch (windowError) {
+      await persistTerminalPublicationFailure(context, claim, windowError, failedAt);
+      return;
+    }
+  }
+  const nextAttemptAt = pollRetryAt(failedAt, claim.round.publicationAttempt);
+  const persisted = reschedulePollRoundPublicationUncertain(pollsDatabase(context.databases), {
+    roundId: claim.round.id,
+    claimToken: claim.claimToken,
+    nextAttemptAt: nextAttemptAt.toISOString(),
+    error: errorMessage(error),
+    updatedAt: failedAt.toISOString()
+  });
+  if (!persisted) {
+    await reconcilePublicationSuccessor(context, claim.poll.id, claim.round.id);
+    return;
+  }
+  await enqueuePollPublishJob(context, {
+    scopeId: claim.poll.scopeId,
+    pollId: claim.poll.id,
+    roundId: claim.round.id,
+    ...(claim.poll.groupId ? { groupId: claim.poll.groupId } : {}),
+    groupWid: claim.poll.chatId,
+    attempt: claim.round.publicationAttempt + 1,
+    runAt: nextAttemptAt
+  });
 }
 
 async function reconcilePublicationSuccessor(
@@ -340,18 +590,23 @@ async function reconcilePublicationSuccessor(
       roundId,
       ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
       groupWid: snapshot.poll.chatId,
-      attempt: snapshot.round.finalizationAttempt,
+      attempt: snapshot.round.finalizationAttempt + 1,
       runAt: new Date(snapshot.round.closesAt)
     });
     return;
   }
   if (snapshot.round.status === 'failed') {
+    const deliveryId = `poll-publication-failure:${roundId}`;
+    const delivery = getPollDelivery(pollsDatabase(context.databases), deliveryId);
+    if (!delivery || delivery.status === 'sent') {
+      return;
+    }
     await enqueuePollDeliveryJob(context, {
       scopeId: snapshot.poll.scopeId,
-      deliveryId: `poll-publication-failure:${roundId}`,
+      deliveryId,
       ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
       groupWid: snapshot.poll.chatId,
-      attempt: 0
+      attempt: delivery.attempt + 1
     });
   }
 }

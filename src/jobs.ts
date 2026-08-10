@@ -41,7 +41,12 @@ export async function enqueuePollPublishJob(
     groupWid: input.groupWid,
     payload: { pollId: input.pollId, roundId: input.roundId },
     ...(input.runAt ? { runAt: input.runAt } : {}),
-    dedupeKey: `${POLL_PUBLISH_JOB}:${input.roundId}:${input.attempt}`
+    dedupeKey: scheduledJobGenerationKey(
+      POLL_PUBLISH_JOB,
+      input.roundId,
+      input.attempt,
+      input.runAt
+    )
   });
 }
 
@@ -65,7 +70,12 @@ export async function enqueuePollFinalizeJob(
     groupWid: input.groupWid,
     payload: { pollId: input.pollId, roundId: input.roundId },
     ...(input.runAt ? { runAt: input.runAt } : {}),
-    dedupeKey: `${POLL_FINALIZE_JOB}:${input.roundId}:${input.attempt}`
+    dedupeKey: scheduledJobGenerationKey(
+      POLL_FINALIZE_JOB,
+      input.roundId,
+      input.attempt,
+      input.runAt
+    )
   });
 }
 
@@ -88,7 +98,12 @@ export async function enqueuePollDeliveryJob(
     ...(input.groupWid ? { groupWid: input.groupWid } : {}),
     payload: { deliveryId: input.deliveryId },
     ...(input.runAt ? { runAt: input.runAt } : {}),
-    dedupeKey: `${POLL_DELIVER_JOB}:${input.deliveryId}:${input.attempt}`
+    dedupeKey: scheduledJobGenerationKey(
+      POLL_DELIVER_JOB,
+      input.deliveryId,
+      input.attempt,
+      input.runAt
+    )
   });
 }
 
@@ -99,7 +114,6 @@ export async function enqueuePollCleanupJob(
     pollId: string;
     groupId?: string | undefined;
     groupWid: string;
-    scheduleKey: string;
     runAt: Date;
   }
 ): Promise<void> {
@@ -111,7 +125,7 @@ export async function enqueuePollCleanupJob(
     groupWid: input.groupWid,
     payload: { pollId: input.pollId },
     runAt: input.runAt,
-    dedupeKey: `${POLL_CLEANUP_JOB}:${input.pollId}:${input.scheduleKey}`
+    dedupeKey: `${POLL_CLEANUP_JOB}:${input.pollId}:${input.runAt.toISOString()}`
   });
 }
 
@@ -119,4 +133,14 @@ export function pollRetryAt(now: Date, attempt: number): Date {
   const normalizedAttempt = Math.max(1, Math.floor(attempt));
   const delayMs = Math.min(15 * 60_000, 5_000 * 2 ** Math.min(normalizedAttempt - 1, 8));
   return new Date(now.getTime() + delayMs);
+}
+
+function scheduledJobGenerationKey(
+  jobName: string,
+  subjectId: string,
+  attempt: number,
+  runAt?: Date | undefined
+): string {
+  const generation = `${jobName}:${subjectId}:${attempt}`;
+  return runAt ? `${generation}:${runAt.toISOString()}` : generation;
 }

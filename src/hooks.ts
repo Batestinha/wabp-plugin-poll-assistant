@@ -32,10 +32,11 @@ export function createPollAssistantHooks(
   context: PluginRuntimeContext,
   options: PollAssistantHooksOptions = {}
 ): PluginRuntimeHooks {
-  if (options.recoverJobs !== false) {
-    startPollAssistantRecovery(context);
-  }
+  const stopRecovery = options.recoverJobs !== false
+    ? startPollAssistantRecovery(context)
+    : undefined;
   return {
+    ...(stopRecovery ? { onShutdown: stopRecovery } : {}),
     async onPollVote(event) {
       await handlePollAssistantVote(context, event);
     },

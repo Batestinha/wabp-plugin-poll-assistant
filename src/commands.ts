@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import type { FlowEngine } from '../../../adminBot/flows/flowEngine';
+import { z } from 'zod';
+import type { FlowEngine, FlowSessionSnapshot } from '../../../adminBot/flows/flowEngine';
 import type { CommandMetadata } from '../../../adminBot/router/commandMetadata';
 import type { CommandContext } from '../../../adminBot/router/commandRouter';
 import type { TranslateFn } from '../../../platform/i18n';
@@ -7,8 +8,11 @@ import type {
   PluginCancellationRegistration,
   PluginCommandContext
 } from '../../../platform/pluginRuntime/types';
-import type { TransportAdapter } from '../../../platform/transport/transportTypes';
-import { requireOfficialCommandRuntime, requireScopeId } from '../shared';
+import {
+  requireOfficialCommandRuntime,
+  requireScopeId,
+  type OfficialPluginCommandRuntime
+} from '../shared';
 import { parsePollAssistantConfig, type PollAssistantConfig } from './config';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';
 import {
@@ -17,14 +21,16 @@ import {
   pollCreationFlowConfirmed,
   isPollCreationFlowType,
   pollDefinitionFromCreationAnswers,
+  type PollCreationClosingAnswer,
   type PollCreationFlowPreferences
 } from './flow';
 import {
   PollCreationFlowStarter,
-  pollCreationDraftKey,
-  readPollCreationDraft,
-  registerPollCreationFlowDefinitionResolver
+  pollCreationRecipeFromSnapshot,
+  registerPollCreationFlowDefinitionResolver,
+  type PollCreationRecipe
 } from './flowStarter';
+import { pollDefinitionSchema, type PollDefinition } from './domain';
 import {
   cancelPoll,
   countActivePollsByChat,
@@ -33,6 +39,8 @@ import {
   getPollDelivery,
   getPollResult,
   listPollsByChat,
+  PollActiveLimitReachedError,
+  PollTieResultDeliveryPendingError,
   pollsDatabase,
   requestPollRoundClose,
   resolvePollTie,
@@ -55,14 +63,75 @@ const POLL_LIST_LIMIT = 50;
 const completionRegistrations = new WeakMap<FlowEngine, Set<string>>();
 export const POLL_CREATION_CANCELLATION_WORKFLOW_ID = 'poll-assistant-create';
 
+interface PollCreationFlowMessenger {
+  getGroupCapabilities(groupWid: string): Promise<{
+    botIsAdmin: boolean;
+    canSend: boolean;
+  }>;
+  sendText(
+    chatId: string,
+    text: string,
+    options: { idempotencyKey: string }
+  ): Promise<unknown>;
+}
+
+const pollCreationTerminalOutcomeSchema = z.enum([
+  'cancelled',
+  'invalid',
+  'runtime_unavailable',
+  'platform_disabled',
+  'creation_disabled',
+  'closing_invalid',
+  'identity_unavailable',
+  'permission_denied',
+  'capability_unavailable',
+  'active_limit'
+]);
+
+const pollCreationTerminalDecisionSchema = z.object({
+  schemaVersion: z.literal(1),
+  kind: z.literal('terminal'),
+  pollId: z.string().trim().min(1).max(200),
+  outcome: pollCreationTerminalOutcomeSchema,
+  maximum: z.number().int().min(1).optional()
+}).strict().superRefine((decision, ctx) => {
+  const requiresMaximum = decision.outcome === 'closing_invalid'
+    || decision.outcome === 'active_limit';
+  if (requiresMaximum !== (decision.maximum !== undefined)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: requiresMaximum
+        ? 'This Poll creation terminal outcome requires a maximum value.'
+        : 'This Poll creation terminal outcome does not accept a maximum value.',
+      path: ['maximum']
+    });
+  }
+});
+
+const pollCreationCreateDecisionSchema = z.object({
+  schemaVersion: z.literal(1),
+  kind: z.literal('create'),
+  pollId: z.string().trim().min(1).max(200),
+  definition: pollDefinitionSchema,
+  maxActivePollsPerChat: z.number().int().min(1).max(100)
+}).strict();
+
+const pollCreationCompletionDecisionSchema = z.union([
+  pollCreationTerminalDecisionSchema,
+  pollCreationCreateDecisionSchema
+]);
+
+type PollCreationTerminalOutcome = z.infer<typeof pollCreationTerminalOutcomeSchema>;
+type PollCreationTerminalDecision = z.infer<typeof pollCreationTerminalDecisionSchema>;
+type PollCreationCompletionDecision = z.infer<typeof pollCreationCompletionDecisionSchema>;
+
 export function registerPollAssistantCommands(context: PluginCommandContext): void {
-  const runtime = requireOfficialCommandRuntime(context);
+  requireOfficialCommandRuntime(context);
   const registerCompletion = (flowType: string, t: TranslateFn) => {
     registerPollCreationFlowCompletionHandler(context, flowType, t);
   };
   registerPollCreationFlowDefinitionResolver({
     flowEngine: context.flowEngine,
-    dataStore: runtime.dataStore,
     i18n: context.i18n
   }, registerCompletion);
 
@@ -142,9 +211,8 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
 }
 
 export function registerPollAssistantCancellations(
-  context: PluginCommandContext
+  _context: PluginCommandContext
 ): PluginCancellationRegistration[] {
-  const runtime = requireOfficialCommandRuntime(context);
   return [{
     workflowId: POLL_CREATION_CANCELLATION_WORKFLOW_ID,
     cancel: async (input) => {
@@ -153,11 +221,10 @@ export function registerPollAssistantCancellations(
         if (!flow.scopeId || !isPollCreationFlowType(flow.flowType)) {
           continue;
         }
-        const draft = await readPollCreationDraft(runtime.dataStore, flow.scopeId, flow.id);
-        if (!draft || draft.actorIdentityId !== input.actorIdentityId) {
+        const recipe = pollCreationRecipeFromSnapshot(flow);
+        if (!recipe || recipe.actorIdentityId !== input.actorIdentityId) {
           continue;
         }
-        await runtime.dataStore.delete(pollCreationDraftKey(flow.scopeId, flow.id));
         cancelled = true;
       }
       return cancelled
@@ -187,156 +254,65 @@ export function registerPollCreationFlowCompletionHandler(
       if (!snapshot || snapshot.flowType !== flowType || !snapshot.scopeId) {
         return false;
       }
-      const draft = await readPollCreationDraft(runtime.dataStore, snapshot.scopeId, lock.flowSessionId);
-      if (!draft) {
+      const recipe = pollCreationRecipeFromSnapshot(snapshot);
+      if (!recipe) {
         return false;
       }
       const responseChatId = snapshot.conversationChatId ?? snapshot.chatId;
-      if (!pollCreationFlowConfirmed(snapshot)) {
-        await finishPollCreationFlow({
-          context,
-          transport: activeTransport,
-          flowPromptId: lock.flowPromptId,
-          draftKey: pollCreationDraftKey(draft.scopeId, draft.flowSessionId),
-          responseChatId,
-          text: t('official.poll-assistant.flowCancelled'),
-          idempotencyKey: `poll-assistant:create:${draft.pollId}:cancelled`
-        });
-        return true;
-      }
-      const answers = pollCreationAnswers(snapshot);
-      if (!answers) {
-        await finishPollCreationFlow({
-          context,
-          transport: activeTransport,
-          flowPromptId: lock.flowPromptId,
-          draftKey: pollCreationDraftKey(draft.scopeId, draft.flowSessionId),
-          responseChatId,
-          text: t('official.poll-assistant.flowInvalid'),
-          idempotencyKey: `poll-assistant:create:${draft.pollId}:invalid`
-        });
-        return true;
-      }
       const db = pollsDatabase(runtime.databases);
-      const existing = getPollAggregate(db, draft.pollId);
-      let maxActivePollsPerChat = 1;
-      if (!existing) {
-        const actor = await context.resolveStableIdentityById?.(draft.actorIdentityId)
-          .catch(() => undefined);
-        if (!actor || actor.identityId !== draft.actorIdentityId) {
-          await finishPollCreationFlow({
-            context,
-            transport: activeTransport,
-            flowPromptId: lock.flowPromptId,
-            draftKey: pollCreationDraftKey(draft.scopeId, draft.flowSessionId),
-            responseChatId,
-            text: t('official.poll-assistant.identityUnavailable'),
-            idempotencyKey: `poll-assistant:create:${draft.pollId}:identity-unavailable`
-          });
-          return true;
-        }
-        const currentConfig = parsePollAssistantConfig(await runtime.configFor(
-          draft.scopeId,
-          draft.actorIdentityId
-        ));
-        if (!currentConfig.enabled) {
-          await finishPollCreationFlow({
-            context,
-            transport: activeTransport,
-            flowPromptId: lock.flowPromptId,
-            draftKey: pollCreationDraftKey(draft.scopeId, draft.flowSessionId),
-            responseChatId,
-            text: t('official.poll-assistant.disabled'),
-            idempotencyKey: `poll-assistant:create:${draft.pollId}:disabled`
-          });
-          return true;
-        }
-        const permission = await context.explainPermission?.({
-          actorIdentityId: draft.actorIdentityId,
-          action: POLL_ASSISTANT_COMMAND_PERMISSIONS.create,
-          scopeId: draft.scopeId,
-          pluginId: POLL_ASSISTANT_PLUGIN_ID,
-          ...(draft.originGroupId ? { groupId: draft.originGroupId } : {}),
-          groupWid: draft.originGroupWid,
-          requiresCurrentManagedGroupMembership: true,
-          currentManagedGroupMembershipMode: 'effective_scope',
-          ...(currentConfig.allowMemberCreation ? { allowCurrentManagedGroupMember: true } : {})
+      const existing = getPollAggregate(db, recipe.pollId);
+      const storedDecision = await readPollCreationCompletionDecision(
+        context.flowEngine,
+        lock.flowPromptId,
+        recipe
+      );
+      if (existing) {
+        await finishCommittedPollCreation({
+          context,
+          messenger: activeTransport,
+          flowPromptId: lock.flowPromptId,
+          responseChatId,
+          recipe,
+          t
         });
-        if (!permission?.allowed) {
-          await finishPollCreationFlow({
-            context,
-            transport: activeTransport,
-            flowPromptId: lock.flowPromptId,
-            draftKey: pollCreationDraftKey(draft.scopeId, draft.flowSessionId),
-            responseChatId,
-            text: t('official.poll-assistant.permissionDenied'),
-            idempotencyKey: `poll-assistant:create:${draft.pollId}:permission-denied`
-          });
-          return true;
-        }
-        const capabilities = await activeTransport.getGroupCapabilities(draft.originGroupWid)
-          .catch(() => undefined);
-        if (!capabilities?.botIsAdmin || !capabilities.canSend) {
-          await finishPollCreationFlow({
-            context,
-            transport: activeTransport,
-            flowPromptId: lock.flowPromptId,
-            draftKey: pollCreationDraftKey(draft.scopeId, draft.flowSessionId),
-            responseChatId,
-            text: t('official.poll-assistant.botCapabilityUnavailable'),
-            idempotencyKey: `poll-assistant:create:${draft.pollId}:capability-unavailable`
-          });
-          return true;
-        }
-        maxActivePollsPerChat = currentConfig.maxActivePollsPerChat;
-        if (countActivePollsByChat(db, draft.originGroupWid) >= maxActivePollsPerChat) {
-          await finishPollCreationFlow({
-            context,
-            transport: activeTransport,
-            flowPromptId: lock.flowPromptId,
-            draftKey: pollCreationDraftKey(draft.scopeId, draft.flowSessionId),
-            responseChatId,
-            text: t('official.poll-assistant.activeLimitReached', {
-              maximum: maxActivePollsPerChat
-            }),
-            idempotencyKey: `poll-assistant:create:${draft.pollId}:active-limit`
-          });
-          return true;
-        }
+        return true;
       }
-      const definition = pollDefinitionFromCreationAnswers({ pollId: draft.pollId, answers });
-      const publishIdempotencyKey = `poll-assistant:publish:${draft.pollId}:round:1`;
-      createPoll(db, {
-        definition,
-        scopeId: draft.scopeId,
-        chatId: draft.originGroupWid,
-        ...(draft.originGroupId ? { groupId: draft.originGroupId } : {}),
-        creatorIdentityId: draft.actorIdentityId,
-        // Keep the persisted aggregate byte-for-byte stable when recovery retries
-        // after the database commit but before the queue acknowledgement.
-        creatorWid: draft.actorWid,
-        creatorLabel: draft.actorLabel,
-        roundId: draft.roundId,
-        publishIdempotencyKey,
-        maxActivePollsPerChat,
-        createdAt: draft.createdAt
-      });
-      await enqueuePollPublishJob(context, {
-        scopeId: draft.scopeId,
-        pollId: draft.pollId,
-        roundId: draft.roundId,
-        ...(draft.originGroupId ? { groupId: draft.originGroupId } : {}),
-        groupWid: draft.originGroupWid,
-        attempt: 1
-      });
-      await finishPollCreationFlow({
+      if (storedDecision) {
+        await executePollCreationCompletionDecision({
+          context,
+          db,
+          messenger: activeTransport,
+          flowPromptId: lock.flowPromptId,
+          responseChatId,
+          recipe,
+          decision: storedDecision,
+          t
+        });
+        return true;
+      }
+      const proposedDecision = await computePollCreationCompletionDecision({
         context,
-        transport: activeTransport,
+        runtime,
+        messenger: activeTransport,
+        snapshot,
+        recipe,
+        db
+      });
+      const decision = await recordPollCreationCompletionDecision(
+        context.flowEngine,
+        lock.flowPromptId,
+        recipe,
+        proposedDecision
+      );
+      await executePollCreationCompletionDecision({
+        context,
+        db,
+        messenger: activeTransport,
         flowPromptId: lock.flowPromptId,
-        draftKey: pollCreationDraftKey(draft.scopeId, draft.flowSessionId),
         responseChatId,
-        text: t('official.poll-assistant.createQueued', { pollId: draft.pollId }),
-        idempotencyKey: `poll-assistant:create:${draft.pollId}:queued`
+        recipe,
+        decision,
+        t
       });
       return true;
     },
@@ -344,6 +320,308 @@ export function registerPollCreationFlowCompletionHandler(
   );
   registered.add(flowType);
   completionRegistrations.set(context.flowEngine, registered);
+}
+
+async function computePollCreationCompletionDecision(input: {
+  context: PluginCommandContext;
+  runtime: OfficialPluginCommandRuntime;
+  messenger: PollCreationFlowMessenger;
+  snapshot: FlowSessionSnapshot;
+  recipe: PollCreationRecipe;
+  db: ReturnType<typeof pollsDatabase>;
+}): Promise<PollCreationCompletionDecision> {
+  if (!pollCreationFlowConfirmed(input.snapshot)) {
+    return terminalPollCreationDecision(input.recipe, 'cancelled');
+  }
+  const answers = pollCreationAnswers(input.snapshot);
+  if (!answers) {
+    return terminalPollCreationDecision(input.recipe, 'invalid');
+  }
+  let definition: PollDefinition;
+  try {
+    definition = pollDefinitionFromCreationAnswers({ pollId: input.recipe.pollId, answers });
+  } catch {
+    return terminalPollCreationDecision(input.recipe, 'invalid');
+  }
+  if (!input.context.enabledFor) {
+    return terminalPollCreationDecision(input.recipe, 'runtime_unavailable');
+  }
+  if (!await input.context.enabledFor(input.recipe.scopeId)) {
+    return terminalPollCreationDecision(input.recipe, 'platform_disabled');
+  }
+  const currentConfig = parsePollAssistantConfig(await input.runtime.configFor(
+    input.recipe.scopeId,
+    input.recipe.actorIdentityId
+  ));
+  if (!currentConfig.allowCreation) {
+    return terminalPollCreationDecision(input.recipe, 'creation_disabled');
+  }
+  if (!closingAllowedAtCompletion(answers.closing, currentConfig.maxDeadlineMinutes)) {
+    return terminalPollCreationDecision(
+      input.recipe,
+      'closing_invalid',
+      currentConfig.maxDeadlineMinutes
+    );
+  }
+  const actor = await input.context.resolveStableIdentityById?.(input.recipe.actorIdentityId)
+    .catch(() => undefined);
+  if (!actor || actor.identityId !== input.recipe.actorIdentityId) {
+    return terminalPollCreationDecision(input.recipe, 'identity_unavailable');
+  }
+  const permission = await input.context.explainPermission?.({
+    actorIdentityId: input.recipe.actorIdentityId,
+    action: POLL_ASSISTANT_COMMAND_PERMISSIONS.create,
+    scopeId: input.recipe.scopeId,
+    pluginId: POLL_ASSISTANT_PLUGIN_ID,
+    ...(input.recipe.originGroupId ? { groupId: input.recipe.originGroupId } : {}),
+    groupWid: input.recipe.originGroupWid,
+    requiresCurrentManagedGroupMembership: true,
+    currentManagedGroupMembershipMode: 'effective_scope',
+    ...(currentConfig.allowMemberCreation ? { allowCurrentManagedGroupMember: true } : {})
+  });
+  if (!permission?.allowed) {
+    return terminalPollCreationDecision(input.recipe, 'permission_denied');
+  }
+  const capabilities = await input.messenger.getGroupCapabilities(input.recipe.originGroupWid)
+    .catch(() => undefined);
+  if (!capabilities?.botIsAdmin || !capabilities.canSend) {
+    return terminalPollCreationDecision(input.recipe, 'capability_unavailable');
+  }
+  if (
+    countActivePollsByChat(input.db, input.recipe.originGroupWid)
+    >= currentConfig.maxActivePollsPerChat
+  ) {
+    return terminalPollCreationDecision(
+      input.recipe,
+      'active_limit',
+      currentConfig.maxActivePollsPerChat
+    );
+  }
+  return pollCreationCompletionDecisionSchema.parse({
+    schemaVersion: 1,
+    kind: 'create',
+    pollId: input.recipe.pollId,
+    definition,
+    maxActivePollsPerChat: currentConfig.maxActivePollsPerChat
+  });
+}
+
+function terminalPollCreationDecision(
+  recipe: PollCreationRecipe,
+  outcome: PollCreationTerminalOutcome,
+  maximum?: number | undefined
+): PollCreationTerminalDecision {
+  return pollCreationTerminalDecisionSchema.parse({
+    schemaVersion: 1,
+    kind: 'terminal',
+    pollId: recipe.pollId,
+    outcome,
+    ...(maximum === undefined ? {} : { maximum })
+  });
+}
+
+async function readPollCreationCompletionDecision(
+  flowEngine: FlowEngine,
+  flowPromptId: string,
+  recipe: PollCreationRecipe
+): Promise<PollCreationCompletionDecision | undefined> {
+  const rawDecision = await flowEngine.getPromptLockDecision(flowPromptId);
+  return rawDecision === undefined
+    ? undefined
+    : parsePollCreationCompletionDecision(rawDecision, recipe);
+}
+
+async function recordPollCreationCompletionDecision(
+  flowEngine: FlowEngine,
+  flowPromptId: string,
+  recipe: PollCreationRecipe,
+  decision: PollCreationCompletionDecision
+): Promise<PollCreationCompletionDecision> {
+  const winningDecision = await flowEngine.recordPromptLockDecision(flowPromptId, decision);
+  return parsePollCreationCompletionDecision(winningDecision, recipe);
+}
+
+function parsePollCreationCompletionDecision(
+  value: unknown,
+  recipe: PollCreationRecipe
+): PollCreationCompletionDecision {
+  const decision = pollCreationCompletionDecisionSchema.parse(value);
+  if (decision.pollId !== recipe.pollId) {
+    throw new Error(
+      `Poll creation prompt decision is bound to ${decision.pollId}, not ${recipe.pollId}.`
+    );
+  }
+  if (decision.kind === 'create' && decision.definition.id !== recipe.pollId) {
+    throw new Error(
+      `Poll creation prompt decision definition is bound to ${decision.definition.id}, not ${recipe.pollId}.`
+    );
+  }
+  return decision;
+}
+
+async function executePollCreationCompletionDecision(input: {
+  context: PluginCommandContext;
+  db: ReturnType<typeof pollsDatabase>;
+  messenger: PollCreationFlowMessenger;
+  flowPromptId: string;
+  responseChatId: string;
+  recipe: PollCreationRecipe;
+  decision: PollCreationCompletionDecision;
+  t: TranslateFn;
+}): Promise<void> {
+  if (input.decision.kind === 'terminal') {
+    await finishTerminalPollCreation({
+      context: input.context,
+      messenger: input.messenger,
+      flowPromptId: input.flowPromptId,
+      responseChatId: input.responseChatId,
+      recipe: input.recipe,
+      decision: input.decision,
+      t: input.t
+    });
+    return;
+  }
+  try {
+    createPoll(input.db, {
+      definition: input.decision.definition,
+      scopeId: input.recipe.scopeId,
+      chatId: input.recipe.originGroupWid,
+      ...(input.recipe.originGroupId ? { groupId: input.recipe.originGroupId } : {}),
+      creatorIdentityId: input.recipe.actorIdentityId,
+      creatorWid: input.recipe.actorWid,
+      creatorLabel: input.recipe.actorLabel,
+      roundId: input.recipe.roundId,
+      publishIdempotencyKey: pollPublishIdempotencyKey(input.recipe.pollId),
+      maxActivePollsPerChat: input.decision.maxActivePollsPerChat,
+      createdAt: input.recipe.createdAt
+    });
+  } catch (error) {
+    if (error instanceof PollActiveLimitReachedError) {
+      // Capacity changed after the immutable create decision won. Keep the
+      // lock recoverable and retry that exact decision when capacity permits;
+      // never rewrite it into a contradictory terminal denial.
+      throw error;
+    }
+    throw error;
+  }
+  await finishCommittedPollCreation({
+    context: input.context,
+    messenger: input.messenger,
+    flowPromptId: input.flowPromptId,
+    responseChatId: input.responseChatId,
+    recipe: input.recipe,
+    t: input.t
+  });
+}
+
+async function finishTerminalPollCreation(input: {
+  context: PluginCommandContext;
+  messenger: PollCreationFlowMessenger;
+  flowPromptId: string;
+  responseChatId: string;
+  recipe: PollCreationRecipe;
+  decision: PollCreationTerminalDecision;
+  t: TranslateFn;
+}): Promise<void> {
+  const reply = pollCreationTerminalReply(input.decision, input.t);
+  await finishPollCreationFlow({
+    context: input.context,
+    messenger: input.messenger,
+    flowPromptId: input.flowPromptId,
+    responseChatId: input.responseChatId,
+    text: reply.text,
+    idempotencyKey: `poll-assistant:create:${input.recipe.pollId}:${reply.idempotencySuffix}`
+  });
+}
+
+function pollCreationTerminalReply(
+  decision: PollCreationTerminalDecision,
+  t: TranslateFn
+): { text: string; idempotencySuffix: string } {
+  switch (decision.outcome) {
+    case 'cancelled':
+      return { text: t('official.poll-assistant.flowCancelled'), idempotencySuffix: 'cancelled' };
+    case 'invalid':
+      return { text: t('official.poll-assistant.flowInvalid'), idempotencySuffix: 'invalid' };
+    case 'runtime_unavailable':
+      return {
+        text: t('official.poll-assistant.runtimeUnavailable'),
+        idempotencySuffix: 'runtime-unavailable'
+      };
+    case 'platform_disabled':
+      return { text: t('official.poll-assistant.disabled'), idempotencySuffix: 'platform-disabled' };
+    case 'creation_disabled':
+      return {
+        text: t('official.poll-assistant.creationDisabled'),
+        idempotencySuffix: 'creation-disabled'
+      };
+    case 'closing_invalid':
+      return {
+        text: t('official.poll-assistant.completionClosingInvalid', {
+          maximumMinutes: requiredPollCreationDecisionMaximum(decision)
+        }),
+        idempotencySuffix: 'closing-invalid'
+      };
+    case 'identity_unavailable':
+      return {
+        text: t('official.poll-assistant.identityUnavailable'),
+        idempotencySuffix: 'identity-unavailable'
+      };
+    case 'permission_denied':
+      return {
+        text: t('official.poll-assistant.permissionDenied'),
+        idempotencySuffix: 'permission-denied'
+      };
+    case 'capability_unavailable':
+      return {
+        text: t('official.poll-assistant.botCapabilityUnavailable'),
+        idempotencySuffix: 'capability-unavailable'
+      };
+    case 'active_limit':
+      return {
+        text: t('official.poll-assistant.activeLimitReached', {
+          maximum: requiredPollCreationDecisionMaximum(decision)
+        }),
+        idempotencySuffix: 'active-limit'
+      };
+  }
+}
+
+function requiredPollCreationDecisionMaximum(decision: PollCreationTerminalDecision): number {
+  if (decision.maximum === undefined) {
+    throw new Error(`Poll creation terminal outcome ${decision.outcome} has no maximum value.`);
+  }
+  return decision.maximum;
+}
+
+async function finishCommittedPollCreation(input: {
+  context: PluginCommandContext;
+  messenger: PollCreationFlowMessenger;
+  flowPromptId: string;
+  responseChatId: string;
+  recipe: PollCreationRecipe;
+  t: TranslateFn;
+}): Promise<void> {
+  await enqueuePollPublishJob(input.context, {
+    scopeId: input.recipe.scopeId,
+    pollId: input.recipe.pollId,
+    roundId: input.recipe.roundId,
+    ...(input.recipe.originGroupId ? { groupId: input.recipe.originGroupId } : {}),
+    groupWid: input.recipe.originGroupWid,
+    attempt: 1
+  });
+  await finishPollCreationFlow({
+    context: input.context,
+    messenger: input.messenger,
+    flowPromptId: input.flowPromptId,
+    responseChatId: input.responseChatId,
+    text: input.t('official.poll-assistant.createQueued', { pollId: input.recipe.pollId }),
+    idempotencyKey: `poll-assistant:create:${input.recipe.pollId}:queued`
+  });
+}
+
+function pollPublishIdempotencyKey(pollId: string): string {
+  return `poll-assistant:publish:${pollId}:round:1`;
 }
 
 async function startPollCreation(context: PluginCommandContext, ctx: CommandContext) {
@@ -358,13 +636,12 @@ async function startPollCreation(context: PluginCommandContext, ctx: CommandCont
     return { handled: true, text: ctx.t('official.poll-assistant.groupRequired') };
   }
   const config = parsePollAssistantConfig(await runtime.configFor(scopeId, actor.identityId));
-  if (!config.enabled) {
-    return { handled: true, text: ctx.t('official.poll-assistant.disabled') };
+  if (!config.allowCreation) {
+    return { handled: true, text: ctx.t('official.poll-assistant.creationDisabled') };
   }
   const preferences = flowPreferences(config);
   const starter = new PollCreationFlowStarter({
     flowEngine: context.flowEngine,
-    dataStore: runtime.dataStore,
     i18n: context.i18n
   }, (flowType, t) => registerPollCreationFlowCompletionHandler(context, flowType, t));
   try {
@@ -520,23 +797,33 @@ async function cancelPollLifecycle(context: PluginCommandContext, ctx: CommandCo
   }
   const groupT = await context.i18n.translatorForScope(lookup.aggregate.poll.scopeId);
   const deliveryId = `poll-assistant:cancel:${lookup.aggregate.poll.id}`;
-  const cancelled = cancelPoll(pollsDatabase(runtime.databases), {
-    pollId: lookup.aggregate.poll.id,
-    cancelledByIdentityId: actor.identityId,
-    cancelledByWid: actor.canonicalWid,
-    delivery: {
-      id: deliveryId,
-      kind: 'cancelled',
-      deliveryKey: deliveryId,
-      chatId: lookup.aggregate.poll.chatId,
-      text: groupT('official.poll-assistant.delivery.cancelled', {
-        question: lookup.aggregate.poll.definition.question,
-        pollId: lookup.aggregate.poll.id
-      }),
-      idempotencyKey: deliveryId
-    },
-    cancelledAt: new Date().toISOString()
-  });
+  let cancelled: boolean;
+  try {
+    cancelled = cancelPoll(pollsDatabase(runtime.databases), {
+      pollId: lookup.aggregate.poll.id,
+      cancelledByIdentityId: actor.identityId,
+      cancelledByWid: actor.canonicalWid,
+      delivery: {
+        id: deliveryId,
+        kind: 'cancelled',
+        deliveryKey: deliveryId,
+        chatId: lookup.aggregate.poll.chatId,
+        text: groupT('official.poll-assistant.delivery.cancelled', {
+          question: lookup.aggregate.poll.definition.question,
+          pollId: lookup.aggregate.poll.id
+        }),
+        idempotencyKey: deliveryId
+      },
+      cancelledAt: new Date().toISOString()
+    });
+  } catch (error) {
+    if (!(error instanceof PollTieResultDeliveryPendingError)) {
+      throw error;
+    }
+    return { handled: true, text: ctx.t('official.poll-assistant.tieDeliveryPending', {
+      pollId: lookup.aggregate.poll.id
+    }) };
+  }
   if (!cancelled) {
     return { handled: true, text: ctx.t('official.poll-assistant.cancel.unavailable', {
       pollId: lookup.aggregate.poll.id
@@ -586,58 +873,84 @@ async function resolvePollLifecycleTie(context: PluginCommandContext, ctx: Comma
     }) };
   }
   const tieOutcome = result.outcome;
+  const tiedOptions = definition.options.filter((option) => tieOutcome.tiedOptionIds.includes(option.id));
+  const renderedTiedOptions = tiedOptions.map((option) => ctx.t(
+    'official.poll-assistant.status.option',
+    {
+      ordinal: option.ordinal,
+      label: option.label,
+      optionId: option.id
+    }
+  )).join('\n');
   const references = args.filter((arg, index) => index > 0 && arg !== '--confirm');
   if (references.length === 0) {
-    return { handled: true, text: ctx.t('official.poll-assistant.resolve.selectionRequired') };
+    return { handled: true, text: ctx.t('official.poll-assistant.resolve.invalidSelection', {
+      count: tieOutcome.remainingSeats,
+      options: renderedTiedOptions
+    }) };
   }
-  const tiedOptions = definition.options.filter((option) => tieOutcome.tiedOptionIds.includes(option.id));
   const selectedIds = references.flatMap((reference) => {
-    const normalized = normalizeOptionReference(reference);
-    const option = tiedOptions.find((candidate) => (
-      normalizeOptionReference(candidate.id) === normalized
-      || String(candidate.ordinal) === normalized
-      || normalizeOptionReference(candidate.label) === normalized
-    ));
+    const option = resolveTiedOptionReference(tiedOptions, reference);
     return option ? [option.id] : [];
   });
   const uniqueSelectedIds = [...new Set(selectedIds)];
   if (
-    uniqueSelectedIds.length !== tieOutcome.remainingSeats
+    references.length !== tieOutcome.remainingSeats
+    || uniqueSelectedIds.length !== tieOutcome.remainingSeats
     || selectedIds.length !== references.length
   ) {
     return { handled: true, text: ctx.t('official.poll-assistant.resolve.invalidSelection', {
       count: tieOutcome.remainingSeats,
-      options: tiedOptions.map((option) => `${option.label} (${option.id})`).join(', ')
+      options: renderedTiedOptions
     }) };
   }
   const actor = ctx.actor?.identityAddress;
   if (!actor?.identityId) {
     return { handled: true, text: ctx.t('official.poll-assistant.identityUnavailable') };
   }
-  const selectedLabels = definition.options
-    .filter((option) => uniqueSelectedIds.includes(option.id))
-    .sort((left, right) => left.ordinal - right.ordinal)
-    .map((option) => option.label);
+  const finalSelectedOptionIds = new Set([
+    ...tieOutcome.certainOptionIds,
+    ...uniqueSelectedIds
+  ]);
+  const selectedOptions = definition.options
+    .filter((option) => finalSelectedOptionIds.has(option.id))
+    .sort((left, right) => left.ordinal - right.ordinal);
   const groupT = await context.i18n.translatorForScope(lookup.aggregate.poll.scopeId);
   const deliveryId = `poll-assistant:resolve:${lookup.aggregate.poll.id}`;
-  resolvePollTie(pollsDatabase(runtime.databases), {
-    roundId: round.id,
-    selectedOptionIds: uniqueSelectedIds,
-    resolverIdentityId: actor.identityId,
-    resolverWid: actor.canonicalWid,
-    delivery: {
-      id: deliveryId,
-      kind: 'result',
-      deliveryKey: deliveryId,
-      chatId: lookup.aggregate.poll.chatId,
-      text: groupT('official.poll-assistant.resolve.delivery', {
-        question: definition.question,
-        options: selectedLabels.join(', ')
-      }),
-      idempotencyKey: deliveryId
-    },
-    resolvedAt: new Date().toISOString()
-  });
+  try {
+    resolvePollTie(pollsDatabase(runtime.databases), {
+      roundId: round.id,
+      selectedOptionIds: uniqueSelectedIds,
+      resolverIdentityId: actor.identityId,
+      resolverWid: actor.canonicalWid,
+      delivery: {
+        id: deliveryId,
+        kind: 'result',
+        deliveryKey: deliveryId,
+        chatId: lookup.aggregate.poll.chatId,
+        text: groupT('official.poll-assistant.resolve.delivery', {
+          question: definition.question,
+          options: selectedOptions.map((option) => groupT(
+            'official.poll-assistant.status.option',
+            {
+              ordinal: option.ordinal,
+              label: option.label,
+              optionId: option.id
+            }
+          )).join('\n')
+        }),
+        idempotencyKey: deliveryId
+      },
+      resolvedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    if (!(error instanceof PollTieResultDeliveryPendingError)) {
+      throw error;
+    }
+    return { handled: true, text: ctx.t('official.poll-assistant.tieDeliveryPending', {
+      pollId: lookup.aggregate.poll.id
+    }) };
+  }
   const delivery = getPollDelivery(pollsDatabase(runtime.databases), deliveryId);
   if (!delivery) {
     throw new Error(`Poll tie-resolution delivery ${deliveryId} was not persisted.`);
@@ -657,21 +970,18 @@ async function resolvePollLifecycleTie(context: PluginCommandContext, ctx: Comma
 
 async function finishPollCreationFlow(input: {
   context: PluginCommandContext;
-  transport: TransportAdapter;
+  messenger: PollCreationFlowMessenger;
   flowPromptId: string;
-  draftKey: string;
   responseChatId: string;
   text: string;
   idempotencyKey: string;
 }): Promise<void> {
-  const runtime = requireOfficialCommandRuntime(input.context);
-  await input.transport.sendText(input.responseChatId, input.text, {
+  await input.messenger.sendText(input.responseChatId, input.text, {
     idempotencyKey: input.idempotencyKey
   });
   if (!await input.context.flowEngine.acknowledgePromptLock(input.flowPromptId)) {
     throw new Error(`Poll creation prompt lock ${input.flowPromptId} could not be acknowledged.`);
   }
-  await runtime.dataStore.delete(input.draftKey);
 }
 
 function lookupPollForCurrentGroup(
@@ -785,6 +1095,24 @@ function flowPreferences(config: PollAssistantConfig): PollCreationFlowPreferenc
   };
 }
 
+function closingAllowedAtCompletion(
+  closing: PollCreationClosingAnswer,
+  maxDeadlineMinutes: number,
+  now = new Date()
+): boolean {
+  if (closing.kind === 'manual') {
+    return true;
+  }
+  if (closing.kind === 'after_publish_duration') {
+    return closing.durationMinutes >= 1 && closing.durationMinutes <= maxDeadlineMinutes;
+  }
+  const closesAt = Date.parse(closing.closesAt);
+  const remainingMs = closesAt - now.getTime();
+  return Number.isFinite(closesAt)
+    && remainingMs > 0
+    && remainingMs <= maxDeadlineMinutes * 60_000;
+}
+
 function currentGroupWid(ctx: CommandContext): string | undefined {
   const groupWid = ctx.groupWid?.trim()
     || (ctx.message.context === 'group' ? ctx.message.chatId.trim() : '');
@@ -854,5 +1182,23 @@ function pollCreationCommandIdempotencyKey(
 }
 
 function normalizeOptionReference(value: string): string {
-  return value.trim().toLocaleLowerCase();
+  return value.trim().toLowerCase();
+}
+
+function resolveTiedOptionReference(
+  tiedOptions: readonly StoredPoll['definition']['options'][number][],
+  reference: string
+): StoredPoll['definition']['options'][number] | undefined {
+  const normalized = normalizeOptionReference(reference);
+  const idMatch = tiedOptions.find((option) => normalizeOptionReference(option.id) === normalized);
+  if (idMatch) {
+    return idMatch;
+  }
+  if (/^[1-9]\d*$/.test(normalized)) {
+    const ordinalMatch = tiedOptions.find((option) => String(option.ordinal) === normalized);
+    if (ordinalMatch) {
+      return ordinalMatch;
+    }
+  }
+  return tiedOptions.find((option) => normalizeOptionReference(option.label) === normalized);
 }

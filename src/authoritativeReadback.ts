@@ -13,7 +13,7 @@ export async function mapAuthoritativePollReadback(input: {
   readback: PollVoteReadback;
   target: PollBallotMappingTarget;
   cutoffAt: Date;
-  eligibleIdentityIds: ReadonlySet<string>;
+  electorateWidByIdentityId: ReadonlyMap<string, string>;
   resolveIdentityAddress(wid: string): Promise<StableIdentityAddressResolution>;
 }): Promise<PollReadbackBallot[]> {
   const votes = requireCompletePollVotes(input.readback);
@@ -24,13 +24,17 @@ export async function mapAuthoritativePollReadback(input: {
   for (const vote of votes) {
     validateReadbackVoteEnvelope(vote, input.target, input.cutoffAt);
     const identity = await input.resolveIdentityAddress(vote.voterWid);
-    if (!input.eligibleIdentityIds.has(identity.identityId)) {
+    const electorateWid = input.electorateWidByIdentityId.get(identity.identityId);
+    if (!electorateWid) {
       continue;
     }
     const projected: ResolvedPollVoteSnapshot = {
       ...vote,
       voterIdentityId: identity.identityId,
-      voterWid: identity.deliveryChatId
+      // Delivery aliases can change as PN/LID knowledge improves. The frozen
+      // electorate address is an immutable publication-time fact and therefore
+      // keeps the deterministic readback stable across finalization retries.
+      voterWid: electorateWid
     };
     const ballot = mapResolvedPollVoteToReadbackBallot(projected, input.target, input.cutoffAt);
     const sourceWaMessageId = requiredSourceMessageId(vote.sourceWaMsgId);

@@ -9,7 +9,7 @@ import {
   numberPollOptions,
   validatePollContent
 } from '../../../platform/transport/pollContract';
-import { pollDefinitionSchema, type PollDefinition } from './domain';
+import { countUnitSchema, pollDefinitionSchema, type PollDefinition } from './domain';
 
 export const POLL_CREATION_FLOW_TYPE_PREFIX = 'official.poll-assistant.create.';
 export const POLL_CREATION_CONFIRM_STEP_ID = 'confirm';
@@ -336,9 +336,9 @@ function buildPollCreationFlowDefinition(input: {
       kind: 'text',
       prompt: input.t('official.poll-assistant.flow.unit'),
       resolveInput: (resolution) => {
-        const unit = resolution.input.trim();
-        return unit && Array.from(unit).length <= 100
-          ? { status: 'use-value', value: unit }
+        const unit = countUnitSchema.safeParse(resolution.input);
+        return unit.success
+          ? { status: 'use-value', value: unit.data }
           : { status: 'error', reply: input.t('official.poll-assistant.flow.unit.invalid') };
       },
       nextStepId: COUNT_OPTIONS_STEP_ID
@@ -607,10 +607,10 @@ function resolvePercentage(
   input: { minimumBasisPoints: number; error: string }
 ): ReturnType<NonNullable<FlowStep['resolveInput']>> {
   const normalized = raw.trim();
-  if (!/^\d{1,3}(?:\.\d{1,2})?$/.test(normalized)) {
+  if (!/^\d{1,3}(?:[.,]\d{1,2})?$/.test(normalized)) {
     return { status: 'error', reply: input.error };
   }
-  const basisPoints = Math.round(Number(normalized) * 100);
+  const basisPoints = Math.round(Number(normalized.replace(',', '.')) * 100);
   return basisPoints >= input.minimumBasisPoints && basisPoints <= 10_000
     ? { status: 'use-value', value: basisPoints }
     : { status: 'error', reply: input.error };
@@ -669,7 +669,7 @@ function validOptionCount(count: number): boolean {
 }
 
 function labelsAreUnique(labels: readonly string[]): boolean {
-  return new Set(labels.map((label) => label.toLocaleLowerCase())).size === labels.length;
+  return new Set(labels.map((label) => label.toLowerCase())).size === labels.length;
 }
 
 function pollCreationAnswersFromState(state: FlowState): PollCreationAnswers | undefined {

@@ -12,11 +12,13 @@ import {
   listPollCleanupCandidateIds,
   listRecoverablePollDeliveryIds,
   listRecoverablePollRounds,
+  markPollCleanupReview,
   pollsDatabase,
   reconcileUncertainPollDelivery
 } from './store';
 
 export const POLL_ASSISTANT_RECOVERY_SWEEP_MS = 30_000;
+const POLL_CLEANUP_FAILURE_REVIEW_MS = 5 * 60_000;
 
 export async function recoverPollAssistantJobs(
   context: PluginRuntimeContext,
@@ -39,7 +41,8 @@ export async function recoverPollAssistantJobs(
         roundId: snapshot.round.id,
         ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
         groupWid: snapshot.poll.chatId,
-        attempt: snapshot.round.publicationAttempt
+        attempt: snapshot.round.publicationAttempt + 1,
+        runAt: now
       });
     } else {
       await enqueuePollFinalizeJob(context, {
@@ -48,7 +51,8 @@ export async function recoverPollAssistantJobs(
         roundId: snapshot.round.id,
         ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
         groupWid: snapshot.poll.chatId,
-        attempt: snapshot.round.finalizationAttempt
+        attempt: snapshot.round.finalizationAttempt + 1,
+        runAt: now
       });
     }
     enqueued += 1;
@@ -84,7 +88,8 @@ export async function recoverPollAssistantJobs(
       deliveryId,
       ...(aggregate.poll.groupId ? { groupId: aggregate.poll.groupId } : {}),
       groupWid: aggregate.poll.chatId,
-      attempt: delivery.attempt
+      attempt: delivery.attempt + 1,
+      runAt: now
     });
     enqueued += 1;
   }
@@ -93,29 +98,70 @@ export async function recoverPollAssistantJobs(
     terminalBefore: now.toISOString(),
     limit: 100
   })) {
-    await cleanupPollBallots(context, pollId, () => now);
-    enqueued += 1;
+    try {
+      await cleanupPollBallots(context, pollId, () => now);
+      enqueued += 1;
+    } catch (error) {
+      const nextReviewAt = new Date(
+        now.getTime() + POLL_CLEANUP_FAILURE_REVIEW_MS
+      ).toISOString();
+      let reviewDeferred = false;
+      try {
+        reviewDeferred = markPollCleanupReview(db, { pollId, nextReviewAt });
+      } catch (reviewError) {
+        context.logger.error(
+          { error: reviewError, pollId, nextReviewAt },
+          'official.poll-assistant failed to defer a cleanup candidate after an error'
+        );
+      }
+      context.logger.error(
+        { error, pollId, nextReviewAt, reviewDeferred },
+        'official.poll-assistant poll cleanup candidate failed'
+      );
+      try {
+        await context.audit.record({
+          action: 'poll-assistant.cleanup.failed',
+          targetJson: { pollId },
+          metadataJson: {
+            error: error instanceof Error ? error.message : String(error),
+            nextReviewAt,
+            reviewDeferred
+          }
+        });
+      } catch (auditError) {
+        context.logger.warn(
+          { error: auditError, pollId },
+          'official.poll-assistant could not audit a cleanup candidate failure'
+        );
+      }
+    }
   }
   return enqueued;
 }
 
-export function startPollAssistantRecovery(context: PluginRuntimeContext): () => void {
-  let running = false;
+export function startPollAssistantRecovery(context: PluginRuntimeContext): () => Promise<void> {
+  let stopped = false;
+  let activeSweep: Promise<void> | undefined;
   const sweep = async (): Promise<void> => {
-    if (running) {
+    if (stopped || activeSweep) {
       return;
     }
-    running = true;
-    try {
-      await recoverPollAssistantJobs(context);
-    } catch (error) {
-      context.logger.error({ error }, 'official.poll-assistant recovery sweep failed');
-    } finally {
-      running = false;
-    }
+    activeSweep = recoverPollAssistantJobs(context)
+      .then(() => undefined)
+      .catch((error) => {
+        context.logger.error({ error }, 'official.poll-assistant recovery sweep failed');
+      })
+      .finally(() => {
+        activeSweep = undefined;
+      });
+    await activeSweep;
   };
   void sweep();
   const timer = setInterval(() => void sweep(), POLL_ASSISTANT_RECOVERY_SWEEP_MS);
   timer.unref();
-  return () => clearInterval(timer);
+  return async () => {
+    stopped = true;
+    clearInterval(timer);
+    await activeSweep;
+  };
 }

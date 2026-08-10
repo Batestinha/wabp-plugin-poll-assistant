@@ -3,6 +3,7 @@ import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runti
 import { equivalentWhatsAppMessageIds } from '../../../platform/transport/messageIds';
 import { mapAuthoritativePollReadback } from './authoritativeReadback';
 import type { PollBallotMappingTarget } from './ballotMapping';
+import { parsePollAssistantConfig } from './config';
 import { enqueuePollDeliveryJob, enqueuePollFinalizeJob, pollRetryAt } from './jobs';
 import { calculatePollResult } from './resultCalculator';
 import { renderPollResult } from './resultRendering';
@@ -12,6 +13,7 @@ import {
   completePollRoundFinalization,
   createPollResultInputSha256,
   getPollAggregate,
+  getPollDelivery,
   getPollLifecycleByRoundId,
   pollsDatabase,
   replacePollBallotsFromAuthoritativeReadback,
@@ -56,6 +58,7 @@ export async function finalizePollRound(
     if (!equivalentWhatsAppMessageIds(readback.pollWaMsgId, snapshot.round.pollWaMessageId)) {
       throw new Error('Authoritative poll readback returned a different poll id.');
     }
+    requireReadbackThroughCutoff(readback.completeThrough, cutoffAt);
     const aggregate = getPollAggregate(db, claim.poll.id);
     if (!aggregate || !snapshot.round.electorateCapturedAt) {
       throw new Error('Poll finalization requires a captured electorate.');
@@ -64,7 +67,10 @@ export async function finalizePollRound(
       readback,
       target: mappingTarget(snapshot),
       cutoffAt,
-      eligibleIdentityIds: new Set(aggregate.electorate.map((elector) => elector.voterIdentityId)),
+      electorateWidByIdentityId: new Map(aggregate.electorate.map((elector) => [
+        elector.voterIdentityId,
+        elector.voterWid
+      ])),
       resolveIdentityAddress: context.resolveIdentityAddress
     });
     const readAt = clock();
@@ -91,7 +97,13 @@ export async function finalizePollRound(
       ballots,
       cutoffAt: cutoffAt.toISOString()
     });
-    const t = await context.i18n.translatorForScope(claim.poll.scopeId);
+    const [t, localeResolution, configInput] = await Promise.all([
+      context.i18n.translatorForScope(claim.poll.scopeId),
+      context.i18n.resolveScopeLocale(claim.poll.scopeId),
+      context.configFor(claim.poll.scopeId)
+    ]);
+    const config = parsePollAssistantConfig(configInput);
+    const cutoffAtLabel = formatTimestamp(cutoffAt, config.timezone, localeResolution.locale);
     const deliveryId = `poll-result:${roundId}`;
     const completed = completePollRoundFinalization(db, {
       roundId,
@@ -104,7 +116,13 @@ export async function finalizePollRound(
         kind: result.purpose === 'decide' && result.outcome.status === 'tie' ? 'tie' : 'result',
         deliveryKey: `result:${roundId}:v1`,
         chatId: claim.poll.chatId,
-        text: renderPollResult({ definition: claim.poll.definition, result, t }),
+        text: renderPollResult({
+          definition: claim.poll.definition,
+          result,
+          cutoffAtLabel,
+          locale: localeResolution.locale,
+          t
+        }),
         idempotencyKey: `poll-assistant:result:${claim.poll.id}:${roundId}:v1`
       },
       completedAt: readAt.toISOString()
@@ -115,11 +133,28 @@ export async function finalizePollRound(
         deliveryId,
         ...(claim.poll.groupId ? { groupId: claim.poll.groupId } : {}),
         groupWid: claim.poll.chatId,
-        attempt: 0
+        attempt: 1
       });
     }
   } catch (error) {
     await rescheduleFinalization(context, claim, error, clock());
+  }
+}
+
+function formatTimestamp(value: Date, timezone: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: timezone
+  }).format(value);
+}
+
+function requireReadbackThroughCutoff(completeThrough: Date | undefined, cutoffAt: Date): void {
+  if (!completeThrough || Number.isNaN(completeThrough.getTime())) {
+    throw new Error('Authoritative poll readback has no trustworthy receipt watermark.');
+  }
+  if (completeThrough.getTime() < cutoffAt.getTime()) {
+    throw new Error('Authoritative poll readback receipt watermark has not reached the closing cutoff.');
   }
 }
 
@@ -191,7 +226,7 @@ async function rescheduleFinalization(
       roundId: claim.round.id,
       ...(claim.poll.groupId ? { groupId: claim.poll.groupId } : {}),
       groupWid: claim.poll.chatId,
-      attempt: claim.round.finalizationAttempt,
+      attempt: claim.round.finalizationAttempt + 1,
       runAt: nextAttemptAt
     });
     return;
@@ -209,12 +244,17 @@ async function reconcileFinalizationSuccessor(
     return;
   }
   if (snapshot.round.status === 'finalized' || snapshot.round.status === 'tie_pending') {
+    const deliveryId = `poll-result:${roundId}`;
+    const delivery = getPollDelivery(pollsDatabase(context.databases), deliveryId);
+    if (!delivery || delivery.status === 'sent') {
+      return;
+    }
     await enqueuePollDeliveryJob(context, {
       scopeId: snapshot.poll.scopeId,
-      deliveryId: `poll-result:${roundId}`,
+      deliveryId,
       ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
       groupWid: snapshot.poll.chatId,
-      attempt: 0
+      attempt: delivery.attempt + 1
     });
   }
 }

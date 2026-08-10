@@ -11,6 +11,8 @@ import {
   claimPollDeliveryById,
   getPollAggregate,
   getPollDelivery,
+  getPollRetentionAnchor,
+  markPollCleanupReview,
   markPollDeliverySent,
   markPollDeliveryUncertain,
   pollsDatabase,
@@ -19,6 +21,8 @@ import {
   type PollDeliveryClaim,
   type StoredPoll
 } from './store';
+
+const POLL_CLEANUP_REVIEW_INTERVAL_MS = 5 * 60_000;
 
 class PollDeliveryNotAttemptedError extends Error {
   override readonly name = 'PollDeliveryNotAttemptedError';
@@ -40,7 +44,7 @@ export async function deliverPollMessage(
   if (!claim) {
     const existing = getPollDelivery(db, deliveryId);
     if (existing?.status === 'sent' && existing.sentAt) {
-      await schedulePollCleanup(context, existing.pollId, deliveryId, new Date(existing.sentAt));
+      await schedulePollCleanup(context, existing.pollId);
     }
     return;
   }
@@ -50,7 +54,8 @@ export async function deliverPollMessage(
       throw new PollDeliveryNotAttemptedError('Poll result delivery transport is unavailable.');
     }
     const sent = await context.sendText(claim.delivery.chatId, claim.delivery.text, {
-      idempotencyKey: claim.delivery.idempotencyKey
+      idempotencyKey: claim.delivery.idempotencyKey,
+      requiredProviderId: 'whatsmeow'
     });
     const messageId = sent.messageId?.trim();
     if (!messageId) {
@@ -64,7 +69,7 @@ export async function deliverPollMessage(
       sentAt: sentAt.toISOString()
     });
     if (persisted) {
-      await schedulePollCleanup(context, claim.delivery.pollId, deliveryId, sentAt);
+      await schedulePollCleanup(context, claim.delivery.pollId);
     }
   } catch (error) {
     if (isSafeToRetryDelivery(error)) {
@@ -93,18 +98,37 @@ export async function cleanupPollBallots(
   const now = clock();
   const config = parsePollAssistantConfig(await context.configFor(aggregate.poll.scopeId));
   const retentionMs = config.ballotRetentionDays * 24 * 60 * 60_000;
-  const terminalAt = pollTerminalAt(aggregate.poll);
-  const eligibleAt = new Date(terminalAt.getTime() + retentionMs);
+  const retentionAnchorValue = getPollRetentionAnchor(db, pollId);
+  if (!retentionAnchorValue) {
+    return;
+  }
+  const retentionAnchor = new Date(retentionAnchorValue);
+  const eligibleAt = new Date(retentionAnchor.getTime() + retentionMs);
   if (eligibleAt.getTime() > now.getTime()) {
+    markPollCleanupReview(db, {
+      pollId,
+      nextReviewAt: new Date(Math.min(
+        eligibleAt.getTime(),
+        now.getTime() + POLL_CLEANUP_REVIEW_INTERVAL_MS
+      )).toISOString()
+    });
     await enqueuePollCleanupJob(context, {
       scopeId: aggregate.poll.scopeId,
       pollId,
       ...(aggregate.poll.groupId ? { groupId: aggregate.poll.groupId } : {}),
       groupWid: aggregate.poll.chatId,
-      scheduleKey: terminalAt.toISOString(),
       runAt: eligibleAt
     });
     return;
+  }
+  if (!context.releasePollSendReceipt) {
+    throw new Error('Authoritative Poll vote-history release is unavailable.');
+  }
+  for (const round of aggregate.rounds) {
+    await context.releasePollSendReceipt(
+      aggregate.poll.chatId,
+      round.publishIdempotencyKey
+    );
   }
   purgePollBallotData(db, {
     pollId,
@@ -139,19 +163,22 @@ async function rescheduleDelivery(
     deliveryId: claim.delivery.id,
     ...(aggregate.poll.groupId ? { groupId: aggregate.poll.groupId } : {}),
     groupWid: aggregate.poll.chatId,
-    attempt: claim.delivery.attempt,
+    attempt: claim.delivery.attempt + 1,
     runAt: nextAttemptAt
   });
 }
 
 async function schedulePollCleanup(
   context: PluginRuntimeContext,
-  pollId: string,
-  deliveryId: string,
-  sentAt: Date
+  pollId: string
 ): Promise<void> {
-  const aggregate = getPollAggregate(pollsDatabase(context.databases), pollId);
+  const db = pollsDatabase(context.databases);
+  const aggregate = getPollAggregate(db, pollId);
   if (!aggregate || !isTerminalPoll(aggregate.poll)) {
+    return;
+  }
+  const retentionAnchorValue = getPollRetentionAnchor(db, pollId);
+  if (!retentionAnchorValue) {
     return;
   }
   const config = parsePollAssistantConfig(await context.configFor(aggregate.poll.scopeId));
@@ -160,8 +187,10 @@ async function schedulePollCleanup(
     pollId,
     ...(aggregate.poll.groupId ? { groupId: aggregate.poll.groupId } : {}),
     groupWid: aggregate.poll.chatId,
-    scheduleKey: deliveryId,
-    runAt: new Date(sentAt.getTime() + config.ballotRetentionDays * 24 * 60 * 60_000)
+    runAt: new Date(
+      new Date(retentionAnchorValue).getTime()
+      + config.ballotRetentionDays * 24 * 60 * 60_000
+    )
   });
 }
 
@@ -173,15 +202,6 @@ function isSafeToRetryDelivery(error: unknown): boolean {
 
 function isTerminalPoll(poll: StoredPoll): boolean {
   return poll.status === 'resolved' || poll.status === 'cancelled' || poll.status === 'failed';
-}
-
-function pollTerminalAt(poll: StoredPoll): Date {
-  const value = poll.resolvedAt ?? poll.cancelledAt ?? poll.updatedAt;
-  const terminalAt = new Date(value);
-  if (Number.isNaN(terminalAt.getTime())) {
-    throw new Error(`Poll ${poll.id} has no valid terminal timestamp.`);
-  }
-  return terminalAt;
 }
 
 function errorMessage(error: unknown): string {
