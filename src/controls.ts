@@ -84,6 +84,17 @@ export const pollAssistantControls: ControlDescriptor[] = [
     { widget: 'select' }
   ),
   control(
+    'creationPresets',
+    'Creation presets',
+    'Configure named poll-creation policies. Fixed fields are supplied by the operator and skipped in chat; suggested fields remain creator-selectable and are shown first.',
+    40,
+    { type: 'array', items: { type: 'object' } },
+    {
+      widget: 'builder',
+      builderId: 'official.poll-assistant.creation-presets.v1'
+    }
+  ),
+  control(
     'defaultClosingMode',
     'Default closing mode',
     'Closing choice shown first in the guided poll setup flow.',
@@ -154,5 +165,14 @@ export const pollAssistantControls: ControlDescriptor[] = [
     { type: 'number', unit: 'days', min: 1, max: 3_650 },
     { widget: 'duration' },
     'Lifecycle limits'
+  ),
+  control(
+    'assistantExposeProvisionalResults',
+    'Assistant may show live tallies',
+    'Allow the natural-language assistant to expose aggregate event-derived tallies for open polls. These results are explicitly provisional; finalized results always use authoritative WhatsApp readback.',
+    400,
+    { type: 'boolean' },
+    { widget: 'toggle' },
+    'Assistant access'
   )
 ];

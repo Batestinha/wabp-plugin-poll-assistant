@@ -9,6 +9,7 @@ import {
   numberPollOptions,
   validatePollContent
 } from '../../../platform/transport/pollContract';
+import type { PollCreationPreset } from './config';
 import { countUnitSchema, pollDefinitionSchema, type PollDefinition } from './domain';
 
 export const POLL_CREATION_FLOW_TYPE_PREFIX = 'official.poll-assistant.create.';
@@ -50,6 +51,7 @@ export interface PollCreationFlowPreferences {
     | { kind: 'manual' }
     | { kind: 'deadline'; durationMinutes: number };
   defaultQuorum: PollCreationQuorumAnswer;
+  preset?: PollCreationPreset | undefined;
 }
 
 export type PollCreationRuleAnswer =
@@ -205,11 +207,13 @@ function buildPollCreationFlowDefinition(input: {
       id: PURPOSE_STEP_ID,
       kind: 'choice',
       prompt: input.t('official.poll-assistant.flow.purpose'),
-      options: [
+      options: orderedByPreferred([
         { label: input.t('official.poll-assistant.flow.purpose.decide'), value: 'decide' },
         { label: input.t('official.poll-assistant.flow.purpose.measure'), value: 'measure' },
         { label: input.t('official.poll-assistant.flow.purpose.count'), value: 'count' }
-      ],
+      ], input.preferences.preset?.purpose.mode !== 'ask'
+        ? input.preferences.preset?.purpose.value ?? 'decide'
+        : 'decide'),
       minSelections: 1,
       maxSelections: 1,
       nextStepIdByValue: {
@@ -228,13 +232,14 @@ function buildPollCreationFlowDefinition(input: {
       id: DECIDE_OPTIONS_STEP_ID,
       prompt: input.t('official.poll-assistant.flow.options.decide'),
       nextStepId: DECIDE_RULE_STEP_ID,
-      t: input.t
+      t: input.t,
+      optionBounds: fixedDecideOptionBounds(input.preferences.preset)
     }),
     [DECIDE_RULE_STEP_ID]: {
       id: DECIDE_RULE_STEP_ID,
       kind: 'choice',
       prompt: input.t('official.poll-assistant.flow.rule.decide'),
-      options: [
+      options: orderedByPreferred([
         { label: input.t('official.poll-assistant.flow.rule.plurality'), value: 'plurality' },
         {
           label: input.t('official.poll-assistant.flow.rule.singleNonTransferable'),
@@ -246,7 +251,7 @@ function buildPollCreationFlowDefinition(input: {
           value: 'multiwinner_approval'
         },
         { label: input.t('official.poll-assistant.flow.rule.approveReject'), value: 'approve_reject' }
-      ],
+      ], preferredDecideRule(input.preferences.preset)),
       optionsForState: (state) => {
         const options = [
           { label: input.t('official.poll-assistant.flow.rule.plurality'), value: 'plurality' },
@@ -260,12 +265,13 @@ function buildPollCreationFlowDefinition(input: {
             value: 'multiwinner_approval'
           }
         ];
-        return optionAnswers(state.data[DECIDE_OPTIONS_STEP_ID])?.length === 2
+        const available = optionAnswers(state.data[DECIDE_OPTIONS_STEP_ID])?.length === 2
           ? [...options, {
               label: input.t('official.poll-assistant.flow.rule.approveReject'),
               value: 'approve_reject'
             }]
           : options;
+        return orderedByPreferred(available, preferredDecideRule(input.preferences.preset));
       },
       minSelections: 1,
       maxSelections: 1,
@@ -280,14 +286,22 @@ function buildPollCreationFlowDefinition(input: {
     [DECIDE_SEATS_STEP_ID]: {
       id: DECIDE_SEATS_STEP_ID,
       kind: 'text',
-      prompt: input.t('official.poll-assistant.flow.seats'),
+      prompt: input.preferences.preset?.decideRule.mode === 'suggest'
+        ? input.t('official.poll-assistant.flow.seats.suggested', {
+            seats: input.preferences.preset.decideRule.seats
+          })
+        : input.t('official.poll-assistant.flow.seats'),
       resolveInput: (resolution) => resolveSeats(resolution, input.t),
       nextStepId: closingStepId('decide')
     },
     [DECIDE_THRESHOLD_STEP_ID]: {
       id: DECIDE_THRESHOLD_STEP_ID,
       kind: 'text',
-      prompt: input.t('official.poll-assistant.flow.threshold'),
+      prompt: input.preferences.preset?.decideRule.mode === 'suggest'
+        ? input.t('official.poll-assistant.flow.threshold.suggested', {
+            threshold: formatBasisPoints(input.preferences.preset.decideRule.minimumApprovalBasisPoints)
+          })
+        : input.t('official.poll-assistant.flow.threshold'),
       resolveInput: (resolution) => resolvePercentage(resolution.input, {
         minimumBasisPoints: 5_001,
         error: input.t('official.poll-assistant.flow.threshold.invalid')
@@ -310,7 +324,7 @@ function buildPollCreationFlowDefinition(input: {
       id: MEASURE_RULE_STEP_ID,
       kind: 'choice',
       prompt: input.t('official.poll-assistant.flow.rule.measure'),
-      options: [
+      options: orderedByPreferred([
         {
           label: input.t('official.poll-assistant.flow.rule.distributionSingle'),
           value: 'distribution_single'
@@ -320,7 +334,9 @@ function buildPollCreationFlowDefinition(input: {
           value: 'distribution_multiple'
         },
         { label: input.t('official.poll-assistant.flow.rule.orderedScale'), value: 'ordered_scale' }
-      ],
+      ], input.preferences.preset?.measureRule.mode !== 'ask'
+        ? input.preferences.preset?.measureRule.kind ?? 'distribution_single'
+        : 'distribution_single'),
       minSelections: 1,
       maxSelections: 1,
       nextStepId: closingStepId('measure')
@@ -334,7 +350,11 @@ function buildPollCreationFlowDefinition(input: {
     [COUNT_UNIT_STEP_ID]: {
       id: COUNT_UNIT_STEP_ID,
       kind: 'text',
-      prompt: input.t('official.poll-assistant.flow.unit'),
+      prompt: input.preferences.preset?.countUnit.mode === 'suggest'
+        ? input.t('official.poll-assistant.flow.unit.suggested', {
+            unit: input.preferences.preset.countUnit.value
+          })
+        : input.t('official.poll-assistant.flow.unit'),
       resolveInput: (resolution) => {
         const unit = countUnitSchema.safeParse(resolution.input);
         return unit.success
@@ -371,7 +391,7 @@ function buildPollCreationFlowDefinition(input: {
     Object.assign(steps, lifecycleSteps(purpose, input.t, input.preferences));
   }
 
-  return {
+  return applyFixedCreationPolicy({
     flowType: input.flowType,
     t: input.t,
     initialStepId: PURPOSE_STEP_ID,
@@ -379,7 +399,152 @@ function buildPollCreationFlowDefinition(input: {
     timeoutMinutes: 30,
     completionReply: false,
     steps
+  }, input.preferences.preset, {
+    ...pollCreationPresetInitialData(input.preferences.preset),
+    ...input.initialData
+  });
+}
+
+export function pollCreationPresetInitialData(
+  preset: PollCreationPreset | undefined
+): Record<string, unknown> {
+  if (!preset) {
+    return {};
+  }
+  const data: Record<string, unknown> = {};
+  if (preset.purpose.mode === 'fixed') {
+    data[PURPOSE_STEP_ID] = [preset.purpose.value];
+  }
+  if (preset.decideRule.mode === 'fixed') {
+    data[DECIDE_RULE_STEP_ID] = [preset.decideRule.kind];
+    if (
+      preset.decideRule.kind === 'single_non_transferable'
+      || preset.decideRule.kind === 'multiwinner_approval'
+    ) {
+      data[DECIDE_SEATS_STEP_ID] = preset.decideRule.seats;
+    }
+    if (preset.decideRule.kind === 'approve_reject') {
+      data[DECIDE_THRESHOLD_STEP_ID] = preset.decideRule.minimumApprovalBasisPoints;
+    }
+  }
+  if (preset.measureRule.mode === 'fixed') {
+    data[MEASURE_RULE_STEP_ID] = [preset.measureRule.kind];
+  }
+  if (preset.countUnit.mode === 'fixed') {
+    data[COUNT_UNIT_STEP_ID] = preset.countUnit.value;
+  }
+  if (preset.closing.mode === 'fixed') {
+    for (const purpose of ['decide', 'measure', 'count'] as const) {
+      data[closingStepId(purpose)] = [preset.closing.kind];
+      if (preset.closing.kind === 'duration') {
+        data[durationStepId(purpose)] = preset.closing.durationMinutes;
+      }
+    }
+  }
+  if (preset.quorum.mode === 'fixed') {
+    for (const purpose of ['decide', 'measure', 'count'] as const) {
+      data[quorumStepId(purpose)] = [preset.quorum.kind];
+      if (preset.quorum.kind === 'absolute') {
+        data[quorumAbsoluteStepId(purpose)] = preset.quorum.minimumResponses;
+      }
+      if (preset.quorum.kind === 'percentage') {
+        data[quorumPercentageStepId(purpose)] = preset.quorum.minimumTurnoutBasisPoints;
+      }
+    }
+  }
+  if (preset.tiePolicy.mode === 'fixed') {
+    data[tiePolicyStepId()] = [preset.tiePolicy.kind];
+  }
+  return data;
+}
+
+function applyFixedCreationPolicy(
+  definition: FlowDefinition,
+  preset: PollCreationPreset | undefined,
+  initialData: Record<string, unknown>
+): FlowDefinition {
+  if (!preset) {
+    return definition;
+  }
+  const fixedStepIds = fixedCreationStepIds(preset);
+  if (fixedStepIds.size === 0) {
+    return definition;
+  }
+  const nextVisibleStepId = (start: string | undefined): string | undefined => {
+    let current = start;
+    const visited = new Set<string>();
+    while (current && fixedStepIds.has(current)) {
+      if (visited.has(current)) {
+        throw new Error(`Poll creation preset ${preset.id} contains a fixed-step cycle at ${current}.`);
+      }
+      visited.add(current);
+      const step = definition.steps[current];
+      if (!step) {
+        throw new Error(`Poll creation preset ${preset.id} references unknown step ${current}.`);
+      }
+      current = nextStepIdForPolicy(step, initialData[current]);
+    }
+    return current;
   };
+  const steps = Object.fromEntries(Object.entries(definition.steps).map(([id, step]) => [
+    id,
+    {
+      ...step,
+      ...(step.nextStepId ? { nextStepId: nextVisibleStepId(step.nextStepId) } : {}),
+      ...(step.nextStepIdByValue ? {
+        nextStepIdByValue: Object.fromEntries(Object.entries(step.nextStepIdByValue).map(
+          ([value, nextStepId]) => {
+            const visible = nextVisibleStepId(nextStepId);
+            if (!visible) {
+              throw new Error(`Poll creation preset ${preset.id} removes the destination for ${id}:${value}.`);
+            }
+            return [value, visible];
+          }
+        ))
+      } : {})
+    }
+  ]));
+  const initialStepId = nextVisibleStepId(definition.initialStepId);
+  if (!initialStepId) {
+    throw new Error(`Poll creation preset ${preset.id} skips every flow step.`);
+  }
+  return { ...definition, initialStepId, steps };
+}
+
+function fixedCreationStepIds(preset: PollCreationPreset): Set<string> {
+  const ids = new Set<string>();
+  if (preset.purpose.mode === 'fixed') ids.add(PURPOSE_STEP_ID);
+  if (preset.decideRule.mode === 'fixed') {
+    ids.add(DECIDE_RULE_STEP_ID);
+    if (
+      preset.decideRule.kind === 'single_non_transferable'
+      || preset.decideRule.kind === 'multiwinner_approval'
+    ) ids.add(DECIDE_SEATS_STEP_ID);
+    if (preset.decideRule.kind === 'approve_reject') ids.add(DECIDE_THRESHOLD_STEP_ID);
+  }
+  if (preset.measureRule.mode === 'fixed') ids.add(MEASURE_RULE_STEP_ID);
+  if (preset.countUnit.mode === 'fixed') ids.add(COUNT_UNIT_STEP_ID);
+  for (const purpose of ['decide', 'measure', 'count'] as const) {
+    if (preset.closing.mode === 'fixed') {
+      ids.add(closingStepId(purpose));
+      if (preset.closing.kind === 'duration') ids.add(durationStepId(purpose));
+    }
+    if (preset.quorum.mode === 'fixed') {
+      ids.add(quorumStepId(purpose));
+      if (preset.quorum.kind === 'absolute') ids.add(quorumAbsoluteStepId(purpose));
+      if (preset.quorum.kind === 'percentage') ids.add(quorumPercentageStepId(purpose));
+    }
+  }
+  if (preset.tiePolicy.mode === 'fixed') ids.add(tiePolicyStepId());
+  return ids;
+}
+
+function nextStepIdForPolicy(step: FlowStep, value: unknown): string | undefined {
+  if (!step.nextStepIdByValue) {
+    return step.nextStepId;
+  }
+  const selected = selectedValue(value);
+  return selected ? step.nextStepIdByValue[selected] ?? step.nextStepId : step.nextStepId;
 }
 
 function questionStep(
@@ -409,6 +574,7 @@ function optionStep(input: {
   nextStepId: string;
   t: TranslateFn;
   count?: boolean | undefined;
+  optionBounds?: { minimum: number; maximum: number } | undefined;
 }): FlowStep {
   return {
     id: input.id,
@@ -418,12 +584,21 @@ function optionStep(input: {
       const options = input.count
         ? parseCountOptions(resolution.input)
         : parseOptions(resolution.input);
-      if (!options || !optionsFit(options)) {
+      if (
+        !options
+        || !optionsFit(options)
+        || (input.optionBounds && (
+          options.length < input.optionBounds.minimum
+          || options.length > input.optionBounds.maximum
+        ))
+      ) {
         return {
           status: 'error',
-          reply: input.t(input.count
-            ? 'official.poll-assistant.flow.options.countInvalid'
-            : 'official.poll-assistant.flow.options.invalid')
+          reply: input.optionBounds
+            ? input.t('official.poll-assistant.flow.options.presetRuleInvalid', input.optionBounds)
+            : input.t(input.count
+              ? 'official.poll-assistant.flow.options.countInvalid'
+              : 'official.poll-assistant.flow.options.invalid')
         };
       }
       return { status: 'use-value', value: options };
@@ -546,13 +721,13 @@ function lifecycleSteps(
             id: tiePolicyStepId(),
             kind: 'choice' as const,
             prompt: t('official.poll-assistant.flow.tiePolicy'),
-            options: [
+            options: orderedByPreferred([
               { label: t('official.poll-assistant.flow.tiePolicy.noDecision'), value: 'no_decision' },
               {
                 label: t('official.poll-assistant.flow.tiePolicy.authorizedChoice'),
                 value: 'authorized_choice'
               }
-            ],
+            ], preferredTiePolicy(preferences.preset)),
             optionsForState: (state) => {
               const options = [
                 { label: t('official.poll-assistant.flow.tiePolicy.noDecision'), value: 'no_decision' },
@@ -561,12 +736,13 @@ function lifecycleSteps(
                   value: 'authorized_choice'
                 }
               ];
-              return selectedValue(state.data[DECIDE_RULE_STEP_ID]) === 'approve_reject'
+              const available = selectedValue(state.data[DECIDE_RULE_STEP_ID]) === 'approve_reject'
                 ? [...options, {
                     label: t('official.poll-assistant.flow.tiePolicy.statusQuo'),
                     value: 'status_quo'
                   }]
                 : options;
+              return orderedByPreferred(available, preferredTiePolicy(preferences.preset));
             },
             minSelections: 1,
             maxSelections: 1,
@@ -955,4 +1131,34 @@ function orderedByPreferred<T extends { value: string }>(options: T[], preferred
     if (right.value === preferred) return 1;
     return 0;
   });
+}
+
+function preferredDecideRule(preset: PollCreationPreset | undefined): string {
+  return preset?.decideRule.mode !== 'ask'
+    ? preset?.decideRule.kind ?? 'plurality'
+    : 'plurality';
+}
+
+function preferredTiePolicy(preset: PollCreationPreset | undefined): string {
+  return preset?.tiePolicy.mode !== 'ask'
+    ? preset?.tiePolicy.kind ?? 'no_decision'
+    : 'no_decision';
+}
+
+function fixedDecideOptionBounds(
+  preset: PollCreationPreset | undefined
+): { minimum: number; maximum: number } | undefined {
+  if (preset?.decideRule.mode !== 'fixed') {
+    return undefined;
+  }
+  if (preset.decideRule.kind === 'approve_reject') {
+    return { minimum: 2, maximum: 2 };
+  }
+  if (
+    preset.decideRule.kind === 'single_non_transferable'
+    || preset.decideRule.kind === 'multiwinner_approval'
+  ) {
+    return { minimum: Math.max(2, preset.decideRule.seats), maximum: 12 };
+  }
+  return undefined;
 }

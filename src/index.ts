@@ -4,6 +4,7 @@ import {
   registerPollAssistantCommands
 } from './commands';
 import { createPollAssistantHooks } from './hooks';
+import { registerPollAssistantTools } from './assistantTools';
 import { pollAssistantManifest } from './manifest';
 
 export const pollAssistantPlugin: BotPlugin = {
@@ -16,6 +17,9 @@ export const pollAssistantPlugin: BotPlugin = {
   },
   registerHooks(context) {
     return createPollAssistantHooks(context);
+  },
+  registerAssistantTools(context) {
+    return registerPollAssistantTools(context);
   }
 };
 

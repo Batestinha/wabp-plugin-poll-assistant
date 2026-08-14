@@ -13,7 +13,11 @@ import {
   requireScopeId,
   type OfficialPluginCommandRuntime
 } from '../shared';
-import { parsePollAssistantConfig, type PollAssistantConfig } from './config';
+import {
+  parsePollAssistantConfig,
+  type PollAssistantConfig,
+  type PollCreationPreset
+} from './config';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';
 import {
   pollCreationAnswers,
@@ -42,7 +46,6 @@ import {
   PollActiveLimitReachedError,
   PollTieResultDeliveryPendingError,
   pollsDatabase,
-  requestPollRoundClose,
   resolvePollTie,
   type StoredPoll,
   type StoredPollAggregate,
@@ -50,9 +53,14 @@ import {
 } from './store';
 import {
   enqueuePollDeliveryJob,
-  enqueuePollFinalizeJob,
   enqueuePollPublishJob
 } from './jobs';
+import {
+  actorCanManagePoll,
+  latestPollRound,
+  lookupPollForGroup,
+  requestPollClose
+} from './operations';
 
 export const POLL_ASSISTANT_COMMAND_PERMISSIONS = {
   create: 'polls.create',
@@ -203,10 +211,7 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
     exampleKey: 'official.poll-assistant.help.create.example',
     topicId: 'create'
   }), async (ctx) => {
-    const args = ctx.remainingArgs ?? ctx.command.args;
-    return args.length === 0
-      ? startPollCreation(context, ctx)
-      : { handled: true, text: ctx.t('official.poll-assistant.usage') };
+    return startPollCreation(context, ctx);
   });
 }
 
@@ -639,7 +644,14 @@ async function startPollCreation(context: PluginCommandContext, ctx: CommandCont
   if (!config.allowCreation) {
     return { handled: true, text: ctx.t('official.poll-assistant.creationDisabled') };
   }
-  const preferences = flowPreferences(config);
+  const requestedPresetId = commandArgs(ctx)[0]?.trim();
+  const preset = resolvePollCreationPreset(config, requestedPresetId);
+  if (preset.kind === 'not_found') {
+    return { handled: true, text: ctx.t('official.poll-assistant.presetNotFound', {
+      presetId: preset.presetId
+    }) };
+  }
+  const preferences = flowPreferences(config, preset.preset);
   const starter = new PollCreationFlowStarter({
     flowEngine: context.flowEngine,
     i18n: context.i18n
@@ -750,22 +762,14 @@ async function closePoll(context: PluginCommandContext, ctx: CommandContext) {
   if (!round || round.status !== 'open') {
     return { handled: true, text: ctx.t('official.poll-assistant.close.notOpen') };
   }
-  const requestedAt = new Date();
-  if (!requestPollRoundClose(pollsDatabase(runtime.databases), {
-    roundId: round.id,
-    requestedAt: requestedAt.toISOString()
-  })) {
+  const close = await requestPollClose({
+    context,
+    databases: runtime.databases,
+    aggregate: lookup.aggregate
+  });
+  if (close.kind === 'not_open') {
     return { handled: true, text: ctx.t('official.poll-assistant.close.notOpen') };
   }
-  await enqueuePollFinalizeJob(context, {
-    scopeId: lookup.aggregate.poll.scopeId,
-    pollId: lookup.aggregate.poll.id,
-    roundId: round.id,
-    ...(lookup.aggregate.poll.groupId ? { groupId: lookup.aggregate.poll.groupId } : {}),
-    groupWid: lookup.aggregate.poll.chatId,
-    runAt: requestedAt,
-    attempt: round.finalizationAttempt + 1
-  });
   return {
     handled: true,
     text: ctx.t('official.poll-assistant.close.queued', { pollId: lookup.aggregate.poll.id })
@@ -992,15 +996,23 @@ function lookupPollForCurrentGroup(
   if (!pollId) {
     return { kind: 'reply', text: ctx.t('official.poll-assistant.pollIdRequired') };
   }
-  const aggregate = getPollAggregate(pollsDatabase(databases), pollId);
-  if (!aggregate || aggregate.poll.scopeId !== requireScopeId(ctx)) {
+  const groupWid = currentGroupWid(ctx);
+  if (!groupWid) {
+    return { kind: 'reply', text: ctx.t('official.poll-assistant.groupRequired') };
+  }
+  const lookup = lookupPollForGroup({
+    databases,
+    scopeId: requireScopeId(ctx),
+    groupWid,
+    pollId
+  });
+  if (lookup.kind === 'not_found') {
     return { kind: 'reply', text: ctx.t('official.poll-assistant.notFound', { pollId }) };
   }
-  const groupWid = currentGroupWid(ctx);
-  if (!groupWid || aggregate.poll.chatId !== groupWid) {
+  if (lookup.kind === 'wrong_group') {
     return { kind: 'reply', text: ctx.t('official.poll-assistant.wrongOriginGroup', { pollId }) };
   }
-  return { kind: 'found', aggregate };
+  return { kind: 'found', aggregate: lookup.aggregate };
 }
 
 async function canManagePoll(
@@ -1008,24 +1020,7 @@ async function canManagePoll(
   ctx: CommandContext,
   poll: StoredPoll
 ): Promise<boolean> {
-  const actorIdentityId = ctx.actor?.identityAddress.identityId;
-  if (!actorIdentityId) {
-    return false;
-  }
-  if (actorIdentityId === poll.creatorIdentityId) {
-    return true;
-  }
-  const decision = await context.explainPermission?.({
-    actorIdentityId,
-    action: POLL_ASSISTANT_COMMAND_PERMISSIONS.manage,
-    scopeId: poll.scopeId,
-    pluginId: POLL_ASSISTANT_PLUGIN_ID,
-    ...(poll.groupId ? { groupId: poll.groupId } : {}),
-    groupWid: poll.chatId,
-    requiresCurrentManagedGroupMembership: true,
-    currentManagedGroupMembershipMode: 'effective_scope'
-  });
-  return decision?.allowed === true;
+  return actorCanManagePoll({ context, actor: ctx.actor, poll });
 }
 
 function pollCommand(input: {
@@ -1076,23 +1071,60 @@ function pollCommand(input: {
   };
 }
 
-function flowPreferences(config: PollAssistantConfig): PollCreationFlowPreferences {
-  const defaultQuorum = config.defaultQuorumMode === 'absolute'
-    ? { kind: 'absolute' as const, minimumResponses: config.defaultAbsoluteQuorumResponses }
-    : config.defaultQuorumMode === 'percentage'
+function flowPreferences(
+  config: PollAssistantConfig,
+  preset?: PollCreationPreset | undefined
+): PollCreationFlowPreferences {
+  const configuredQuorumMode = preset && preset.quorum.mode !== 'ask'
+    ? preset.quorum.kind
+    : config.defaultQuorumMode;
+  const defaultQuorum = configuredQuorumMode === 'absolute'
+    ? {
+        kind: 'absolute' as const,
+        minimumResponses: preset && preset.quorum.mode !== 'ask'
+          ? preset.quorum.minimumResponses
+          : config.defaultAbsoluteQuorumResponses
+      }
+    : configuredQuorumMode === 'percentage'
       ? {
           kind: 'percentage' as const,
-          minimumTurnoutBasisPoints: config.defaultPercentageQuorumBasisPoints
+          minimumTurnoutBasisPoints: preset && preset.quorum.mode !== 'ask'
+            ? preset.quorum.minimumTurnoutBasisPoints
+            : config.defaultPercentageQuorumBasisPoints
         }
       : { kind: 'none' as const };
+  const configuredClosing = preset && preset.closing.mode !== 'ask'
+    ? preset.closing
+    : undefined;
   return {
     timezone: config.timezone,
     maxDeadlineMinutes: config.maxDeadlineMinutes,
-    defaultClosing: config.defaultClosingMode === 'manual'
+    defaultClosing: configuredClosing?.kind === 'manual'
+      ? { kind: 'manual' }
+      : configuredClosing?.kind === 'duration'
+        ? { kind: 'deadline', durationMinutes: configuredClosing.durationMinutes }
+        : config.defaultClosingMode === 'manual'
       ? { kind: 'manual' }
       : { kind: 'deadline', durationMinutes: config.defaultDeadlineMinutes },
-    defaultQuorum
+    defaultQuorum,
+    ...(preset ? { preset } : {})
   };
+}
+
+function resolvePollCreationPreset(
+  config: PollAssistantConfig,
+  requestedPresetId: string | undefined
+): { kind: 'found'; preset?: PollCreationPreset | undefined }
+  | { kind: 'not_found'; presetId: string } {
+  const enabled = config.creationPresets.filter((preset) => preset.enabled);
+  if (requestedPresetId) {
+    const preset = enabled.find((candidate) => candidate.id === requestedPresetId);
+    return preset
+      ? { kind: 'found', preset }
+      : { kind: 'not_found', presetId: requestedPresetId };
+  }
+  const defaultPreset = enabled.find((preset) => preset.isDefault);
+  return defaultPreset ? { kind: 'found', preset: defaultPreset } : { kind: 'found' };
 }
 
 function closingAllowedAtCompletion(
@@ -1124,7 +1156,7 @@ function commandArgs(ctx: CommandContext): string[] {
 }
 
 function latestRound(aggregate: StoredPollAggregate): StoredPollRound | undefined {
-  return [...aggregate.rounds].sort((left, right) => right.roundNumber - left.roundNumber)[0];
+  return latestPollRound(aggregate);
 }
 
 function purposeLabel(poll: StoredPoll, t: TranslateFn): string {

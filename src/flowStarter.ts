@@ -10,10 +10,12 @@ import type { I18nService, LanguagePackScope, TranslateFn } from '../../../platf
 import type { StableIdentityAddressResolution } from '../../../platform/identity/identityAddressService';
 import type { PrivateDeliveryFallback } from '../../../platform/transport/transportTypes';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';
+import { pollCreationPresetSchema } from './config';
 import {
   createPollCreationFlowDefinition,
   isPollCreationFlowType,
   POLL_CREATION_FLOW_TYPE_PREFIX,
+  pollCreationPresetInitialData,
   restorePollCreationFlowDefinition,
   type PollCreationFlowPreferences
 } from './flow';
@@ -55,7 +57,8 @@ const pollCreationPreferencesSchema = z.object({
       kind: z.literal('percentage'),
       minimumTurnoutBasisPoints: z.number().int().min(1).max(10_000)
     }).strict()
-  ])
+  ]),
+  preset: pollCreationPresetSchema.optional()
 }).strict().superRefine((value, ctx) => {
   if (
     value.defaultClosing.kind === 'deadline'
@@ -176,6 +179,7 @@ export class PollCreationFlowStarter {
       createdAt: new Date().toISOString()
     });
     const initialData: Record<string, unknown> = {
+      ...pollCreationPresetInitialData(recipe.preferences.preset),
       [POLL_CREATION_RECIPE_DATA_KEY]: recipe
     };
     const t = this.context.i18n.translator(recipe.locale, recipe.languagePackScopes);
