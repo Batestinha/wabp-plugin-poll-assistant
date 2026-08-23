@@ -167,6 +167,15 @@ export const pollAssistantControls: ControlDescriptor[] = [
     'Lifecycle limits'
   ),
   control(
+    'maxPrivateElectorateSize',
+    'Private ballot electorate limit',
+    'Maximum eligible voters for a private multi-recipient poll. The platform limit is 250.',
+    320,
+    { type: 'number', unit: 'items', min: 1, max: 250 },
+    { widget: 'number' },
+    'Lifecycle limits'
+  ),
+  control(
     'assistantExposeProvisionalResults',
     'Assistant may show live tallies',
     'Allow the natural-language assistant to expose aggregate event-derived tallies for open polls. These results are explicitly provisional; finalized results always use authoritative WhatsApp readback.',

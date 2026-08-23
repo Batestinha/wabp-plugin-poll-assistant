@@ -21,6 +21,7 @@ import {
   type PollReadbackBallot,
   type PollResult
 } from './domain';
+import { describePollRandomDraw } from './resultCalculator';
 
 const timestampSchema = z.string().datetime({ offset: true });
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -38,6 +39,14 @@ export type PollRoundStatus =
 export type PollPublicationOutcome = 'not_attempted' | 'unknown' | 'accepted';
 export type PollDeliveryStatus = 'pending' | 'sending' | 'sent' | 'uncertain';
 export type PollDeliveryKind = 'result' | 'tie' | 'cancelled' | 'failure';
+export type PollPrivateIssuanceStatus = 'pending' | 'publishing' | 'sent' | 'uncertain' | 'failed';
+
+export interface StoredPollRandomDrawAudit {
+  roundId: string;
+  eventKey: string;
+  createdAt: string;
+  sentAt?: string | undefined;
+}
 
 export const POLL_PUBLICATION_LEASE_MS = 2 * 60 * 1_000;
 export const POLL_FINALIZATION_LEASE_MS = 2 * 60 * 1_000;
@@ -61,6 +70,11 @@ export interface CreatePollInput {
   creatorLabel: string;
   roundId: string;
   publishIdempotencyKey: string;
+  source?: {
+    pluginId: string;
+    idempotencyKey: string;
+    requestSha256: string;
+  } | undefined;
   maxActivePollsPerChat: number;
   createdAt: string;
 }
@@ -113,6 +127,11 @@ export interface StoredPoll {
   cancelReason?: string | undefined;
   ballotsPurgedAt?: string | undefined;
   lastError?: string | undefined;
+  source?: {
+    pluginId: string;
+    idempotencyKey: string;
+    requestSha256: string;
+  } | undefined;
 }
 
 export interface StoredPollAggregate {
@@ -160,6 +179,9 @@ export interface PollDeliveryIntent {
   chatId: string;
   text: string;
   idempotencyKey: string;
+  notBefore?: string | undefined;
+  deliveryBatchKey?: string | undefined;
+  deliverySequence?: number | undefined;
 }
 
 export interface StoredPollDelivery extends PollDeliveryIntent {
@@ -175,12 +197,42 @@ export interface StoredPollDelivery extends PollDeliveryIntent {
   createdAt: string;
   updatedAt: string;
   sentAt?: string | undefined;
+  deliveryBatchKey?: string | undefined;
+  deliverySequence?: number | undefined;
 }
 
 export interface PollDeliveryClaim {
   delivery: StoredPollDelivery;
   claimToken: string;
   leaseExpiresAt: string;
+}
+
+export interface StoredPollPrivateIssuance {
+  id: string;
+  pollId: string;
+  roundId: string;
+  voterIdentityId: string;
+  voterWid: string;
+  publishIdempotencyKey: string;
+  status: PollPrivateIssuanceStatus;
+  attempt: number;
+  claimToken?: string | undefined;
+  leaseExpiresAt?: string | undefined;
+  nextAttemptAt?: string | undefined;
+  publicationStartedAt?: string | undefined;
+  pollWaMessageId?: string | undefined;
+  remoteChatId?: string | undefined;
+  acceptedAt?: string | undefined;
+  publicationAuditSentAt?: string | undefined;
+  lastError?: string | undefined;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PollRollingMembershipReviewClaim {
+  pollId: string;
+  roundId: string;
+  claimedUntil: string;
 }
 
 interface PollRow extends PluginDatabaseRow {
@@ -204,6 +256,11 @@ interface PollRow extends PluginDatabaseRow {
   ballots_purged_at: string | null;
   cleanup_next_review_at: string | null;
   last_error: string | null;
+  source_plugin_id: string | null;
+  source_idempotency_key: string | null;
+  source_request_sha256: string | null;
+  rolling_membership_observed_at: string | null;
+  rolling_membership_next_review_at: string | null;
 }
 
 interface PollRoundRow extends PluginDatabaseRow {
@@ -269,6 +326,37 @@ interface DeliveryRow extends PluginDatabaseRow {
   created_at: string;
   updated_at: string;
   sent_at: string | null;
+  delivery_batch_key: string | null;
+  delivery_sequence: number | null;
+}
+
+interface PrivateIssuanceRow extends PluginDatabaseRow {
+  id: string;
+  poll_id: string;
+  round_id: string;
+  voter_identity_id: string;
+  voter_wid: string;
+  publish_idempotency_key: string;
+  status: PollPrivateIssuanceStatus;
+  attempt: number;
+  claim_token: string | null;
+  lease_expires_at: string | null;
+  next_attempt_at: string | null;
+  publication_started_at: string | null;
+  poll_wa_message_id: string | null;
+  remote_chat_id: string | null;
+  accepted_at: string | null;
+  publication_audit_sent_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface RollingMembershipCandidateRow extends PluginDatabaseRow {
+  poll_id: string;
+  round_id: string;
+  definition_json: string;
+  closes_at: string | null;
 }
 
 export function pollsDatabase(registry: PluginDatabaseRegistry | undefined): PluginDatabase {
@@ -286,6 +374,11 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
   const creatorLabel = required(input.creatorLabel, 'creatorLabel');
   const roundId = required(input.roundId, 'roundId');
   const publishIdempotencyKey = required(input.publishIdempotencyKey, 'publishIdempotencyKey');
+  const source = input.source ? {
+    pluginId: required(input.source.pluginId, 'source.pluginId'),
+    idempotencyKey: required(input.source.idempotencyKey, 'source.idempotencyKey'),
+    requestSha256: sha256Schema.parse(input.source.requestSha256)
+  } : undefined;
   if (!Number.isInteger(input.maxActivePollsPerChat) || input.maxActivePollsPerChat < 1) {
     throw new Error('maxActivePollsPerChat must be a positive integer.');
   }
@@ -305,6 +398,7 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
         creatorLabel,
         roundId,
         publishIdempotencyKey,
+        source,
         createdAt
       })) {
         throw new Error(`Poll id ${definition.id} is already bound to different canonical input.`);
@@ -322,8 +416,9 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
     db.run(
       `INSERT INTO polls (
          id, scope_id, chat_id, group_id, creator_identity_id, creator_wid, creator_label,
-         purpose, definition_json, status, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`,
+         purpose, definition_json, status, created_at, updated_at,
+         source_plugin_id, source_idempotency_key, source_request_sha256
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
       definition.id,
       scopeId,
       chatId,
@@ -334,7 +429,10 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
       definition.purpose,
       JSON.stringify(definition),
       createdAt,
-      createdAt
+      createdAt,
+      source?.pluginId ?? null,
+      source?.idempotencyKey ?? null,
+      source?.requestSha256 ?? null
     );
     db.run(
       `INSERT INTO poll_rounds (
@@ -395,6 +493,21 @@ export function getPollAggregate(db: PluginDatabase, pollId: string): StoredPoll
       pollId
     ).map(electorFromRow)
   };
+}
+
+export function getPollAggregateBySource(db: PluginDatabase, input: {
+  scopeId: string;
+  sourcePluginId: string;
+  sourceIdempotencyKey: string;
+}): StoredPollAggregate | undefined {
+  const row = db.get<{ id: string }>(
+    `SELECT id FROM polls
+      WHERE scope_id = ? AND source_plugin_id = ? AND source_idempotency_key = ?`,
+    required(input.scopeId, 'scopeId'),
+    required(input.sourcePluginId, 'sourcePluginId'),
+    required(input.sourceIdempotencyKey, 'sourceIdempotencyKey')
+  );
+  return row ? getPollAggregate(db, row.id) : undefined;
 }
 
 export function listActivePollsByChat(
@@ -489,7 +602,7 @@ export function cancelPoll(db: PluginDatabase, input: {
               publication_lease_expires_at = NULL, finalization_claim_token = NULL,
               finalization_lease_expires_at = NULL, updated_at = ?
         WHERE poll_id = ?
-          AND status IN ('publish_pending', 'open', 'finalizing', 'tie_pending')`,
+          AND status IN ('publish_pending', 'open', 'tie_pending')`,
       cancelledAt,
       pollId
     );
@@ -519,6 +632,11 @@ export function listPollCleanupCandidateIds(db: PluginDatabase, input: {
           AND NOT EXISTS (
             SELECT 1 FROM poll_deliveries d
              WHERE d.poll_id = p.id AND d.status <> 'sent'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM poll_private_issuances ppi
+             WHERE ppi.poll_id = p.id AND ppi.status = 'sent'
+               AND ppi.publication_audit_sent_at IS NULL
           )
      ), anchored AS (
        SELECT id,
@@ -572,6 +690,11 @@ export function getPollRetentionAnchor(db: PluginDatabase, pollIdInput: string):
             SELECT 1 FROM poll_deliveries d
              WHERE d.poll_id = p.id AND d.status <> 'sent'
           )
+          AND NOT EXISTS (
+            SELECT 1 FROM poll_private_issuances ppi
+             WHERE ppi.poll_id = p.id AND ppi.status = 'sent'
+               AND ppi.publication_audit_sent_at IS NULL
+          )
      )
      SELECT CASE
               WHEN julianday(latest_delivery_at) > julianday(terminal_at) THEN latest_delivery_at
@@ -605,6 +728,11 @@ export function purgePollBallotData(db: PluginDatabase, input: {
               SELECT 1 FROM poll_deliveries d
                WHERE d.poll_id = p.id AND d.status <> 'sent'
             )
+            AND NOT EXISTS (
+              SELECT 1 FROM poll_private_issuances ppi
+               WHERE ppi.poll_id = p.id AND ppi.status = 'sent'
+                 AND ppi.publication_audit_sent_at IS NULL
+            )
        )
        SELECT 1
          FROM terminal_poll
@@ -630,6 +758,8 @@ export function purgePollBallotData(db: PluginDatabase, input: {
       db.run('DELETE FROM poll_readbacks WHERE round_id = ?', roundId);
     }
     db.run('DELETE FROM poll_electorate WHERE poll_id = ?', pollId);
+    db.run('DELETE FROM poll_membership_transitions WHERE poll_id = ?', pollId);
+    db.run('DELETE FROM poll_private_issuances WHERE poll_id = ?', pollId);
     const updated = db.run(
       `UPDATE polls
           SET ballots_purged_at = ?, cleanup_next_review_at = NULL, updated_at = ?
@@ -868,6 +998,32 @@ export function capturePollElectorate(db: PluginDatabase, input: {
         capturedAt
       );
     });
+    const pollRow = db.get<PollRow>('SELECT * FROM polls WHERE id = ?', round.poll_id)!;
+    const poll = pollFromRow(pollRow);
+    if (
+      poll.definition.ballotDelivery === 'private'
+      && poll.definition.electorate.kind === 'group_members_until_cutoff'
+    ) {
+      electorate.forEach((elector) => {
+        recordPollMembershipTransition(db, {
+          pollId: round.poll_id,
+          voterIdentityId: elector.voterIdentityId,
+          state: 'present',
+          occurredAt: capturedAt,
+          eventId: `initial-snapshot:${capturedAt}`
+        });
+      });
+      db.run(
+        `UPDATE polls SET rolling_membership_observed_at = ?
+          WHERE id = ? AND (
+            rolling_membership_observed_at IS NULL
+            OR julianday(rolling_membership_observed_at) < julianday(?)
+          )`,
+        capturedAt,
+        round.poll_id,
+        capturedAt
+      );
+    }
     const updated = db.run(
       `UPDATE poll_rounds
           SET electorate_captured_at = ?, updated_at = ?
@@ -986,6 +1142,951 @@ export function getCapturedPollElectorateByRoundId(
     return undefined;
   }
   return getPollAggregate(db, round.poll_id)!.electorate;
+}
+
+export function ensurePollPrivateIssuancesForCapturedElectorate(
+  db: PluginDatabase,
+  input: {
+    roundId: string;
+    claimToken: string;
+    createdAt: string;
+  }
+): StoredPollPrivateIssuance[] {
+  const roundId = required(input.roundId, 'roundId');
+  const claimToken = required(input.claimToken, 'claimToken');
+  const createdAt = timestampSchema.parse(input.createdAt);
+  return db.transaction(() => {
+    const round = db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ?', roundId);
+    if (
+      !round
+      || round.status !== 'publishing'
+      || round.publication_claim_token !== claimToken
+      || !round.electorate_captured_at
+    ) {
+      throw new Error(`Publication claim for private poll round ${roundId} was lost.`);
+    }
+    const poll = pollFromRow(db.get<PollRow>('SELECT * FROM polls WHERE id = ?', round.poll_id)!);
+    if (poll.definition.ballotDelivery !== 'private') {
+      throw new Error(`Poll round ${roundId} does not use private ballot delivery.`);
+    }
+    const electors = db.all<ElectorRow>(
+      `SELECT voter_identity_id, voter_wid, display_label
+         FROM poll_electorate WHERE poll_id = ? ORDER BY voter_identity_id ASC`,
+      round.poll_id
+    ).map(electorFromRow);
+    for (const elector of electors) {
+      insertPrivateIssuanceIfAbsent(db, {
+        pollId: round.poll_id,
+        roundId,
+        elector,
+        createdAt
+      });
+    }
+    return listPollPrivateIssuancesByRound(db, roundId);
+  });
+}
+
+export function claimDuePollRollingMembershipReviews(db: PluginDatabase, input: {
+  now: string;
+  claimedUntil: string;
+  limit?: number | undefined;
+}): PollRollingMembershipReviewClaim[] {
+  const now = timestampSchema.parse(input.now);
+  const claimedUntil = timestampSchema.parse(input.claimedUntil);
+  if (Date.parse(claimedUntil) <= Date.parse(now)) {
+    throw new Error('Rolling-membership review claim must expire after it starts.');
+  }
+  const limit = normalizedLimit(input.limit);
+  return db.transaction(() => {
+    const candidates = db.all<RollingMembershipCandidateRow>(
+      `SELECT p.id AS poll_id, pr.id AS round_id, p.definition_json, pr.closes_at
+         FROM polls p
+         JOIN poll_rounds pr ON pr.poll_id = p.id
+        WHERE p.status = 'active' AND pr.status = 'open'
+          AND (pr.closes_at IS NULL OR julianday(pr.closes_at) > julianday(?))
+          AND (
+            p.rolling_membership_next_review_at IS NULL
+            OR julianday(p.rolling_membership_next_review_at) <= julianday(?)
+          )
+        ORDER BY p.created_at ASC, p.id ASC, pr.round_number DESC
+        LIMIT ?`,
+      now,
+      now,
+      Math.min(1_000, limit * 4)
+    );
+    const claims: PollRollingMembershipReviewClaim[] = [];
+    const claimedPollIds = new Set<string>();
+    for (const candidate of candidates) {
+      if (claims.length >= limit || claimedPollIds.has(candidate.poll_id)) {
+        continue;
+      }
+      const definition = pollDefinitionSchema.parse(
+        parseJson(candidate.definition_json, 'poll definition')
+      );
+      if (
+        definition.ballotDelivery !== 'private'
+        || definition.electorate.kind !== 'group_members_until_cutoff'
+      ) {
+        continue;
+      }
+      const claimed = db.run(
+        `UPDATE polls SET rolling_membership_next_review_at = ?
+          WHERE id = ? AND status = 'active' AND (
+            rolling_membership_next_review_at IS NULL
+            OR julianday(rolling_membership_next_review_at) <= julianday(?)
+        )`,
+        claimedUntil,
+        candidate.poll_id,
+        now
+      );
+      if (claimed.changes !== 1) {
+        continue;
+      }
+      claimedPollIds.add(candidate.poll_id);
+      claims.push({
+        pollId: candidate.poll_id,
+        roundId: candidate.round_id,
+        claimedUntil
+      });
+    }
+    return claims;
+  });
+}
+
+export function deferPollRollingMembershipReview(db: PluginDatabase, input: {
+  pollId: string;
+  claimedUntil: string;
+  nextReviewAt: string;
+}): boolean {
+  const claimedUntil = timestampSchema.parse(input.claimedUntil);
+  const nextReviewAt = timestampSchema.parse(input.nextReviewAt);
+  const deferred = db.run(
+    `UPDATE polls SET rolling_membership_next_review_at = ?
+      WHERE id = ? AND status = 'active' AND rolling_membership_next_review_at = ?`,
+    nextReviewAt,
+    required(input.pollId, 'pollId'),
+    claimedUntil
+  );
+  return deferred.changes === 1;
+}
+
+export function reconcilePollElectorateFromPreCutoffSnapshot(db: PluginDatabase, input: {
+  pollId: string;
+  roundId: string;
+  electorate: readonly PollElector[];
+  observedAt: string;
+  maxElectorateSize: number;
+}): boolean {
+  const pollId = required(input.pollId, 'pollId');
+  const roundId = required(input.roundId, 'roundId');
+  const observedAt = timestampSchema.parse(input.observedAt);
+  const electorate = input.electorate.map((elector) => pollElectorSchema.parse(elector))
+    .sort((left, right) => left.voterIdentityId.localeCompare(right.voterIdentityId));
+  requireDistinct(electorate.map((elector) => elector.voterIdentityId), 'Electorate identity ids');
+  if (!Number.isInteger(input.maxElectorateSize) || input.maxElectorateSize < 1) {
+    throw new Error('maxElectorateSize must be a positive integer.');
+  }
+  if (electorate.length > input.maxElectorateSize) {
+    throw new PollActiveLimitReachedError(
+      `Private poll electorate ${electorate.length} exceeds configured maximum ${input.maxElectorateSize}.`
+    );
+  }
+  return db.transaction(() => {
+    const pollRow = db.get<PollRow>('SELECT * FROM polls WHERE id = ?', pollId);
+    const round = db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ?', roundId);
+    if (!pollRow || !round || round.poll_id !== pollId) {
+      return false;
+    }
+    const poll = pollFromRow(pollRow);
+    if (
+      poll.status !== 'active'
+      || poll.definition.ballotDelivery !== 'private'
+      || poll.definition.electorate.kind !== 'group_members_until_cutoff'
+      || round.status !== 'open'
+      || (round.closes_at && Date.parse(observedAt) >= Date.parse(round.closes_at))
+      || (
+        pollRow.rolling_membership_observed_at
+        && Date.parse(pollRow.rolling_membership_observed_at) >= Date.parse(observedAt)
+      )
+    ) {
+      return false;
+    }
+
+    const snapshotIdentityIds = new Set(electorate.map((elector) => elector.voterIdentityId));
+    const removedIdentityIds = db.all<{ voter_identity_id: string }>(
+      'SELECT voter_identity_id FROM poll_electorate WHERE poll_id = ?',
+      pollId
+    ).map((row) => row.voter_identity_id)
+      .filter((identityId) => !snapshotIdentityIds.has(identityId));
+
+    for (const identityId of removedIdentityIds) {
+      const transitionApplied = recordPollMembershipTransition(db, {
+        pollId,
+        voterIdentityId: identityId,
+        state: 'absent',
+        occurredAt: observedAt,
+        eventId: `authoritative-snapshot:${observedAt}:absent`
+      });
+      if (!transitionApplied) {
+        continue;
+      }
+      db.run(
+        'DELETE FROM poll_electorate WHERE poll_id = ? AND voter_identity_id = ?',
+        pollId,
+        identityId
+      );
+      markPrivateIssuanceElectorRemoved(db, {
+        roundId,
+        voterIdentityId: identityId,
+        removedAt: observedAt
+      });
+    }
+
+    for (const elector of electorate) {
+      const transitionApplied = recordPollMembershipTransition(db, {
+        pollId,
+        voterIdentityId: elector.voterIdentityId,
+        state: 'present',
+        occurredAt: observedAt,
+        eventId: `authoritative-snapshot:${observedAt}:present`
+      });
+      if (!transitionApplied) {
+        continue;
+      }
+      db.run(
+        `INSERT INTO poll_electorate (
+           poll_id, voter_identity_id, voter_wid, display_label, captured_at
+         ) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(poll_id, voter_identity_id) DO UPDATE SET
+           voter_wid = excluded.voter_wid,
+           display_label = COALESCE(excluded.display_label, poll_electorate.display_label),
+           captured_at = excluded.captured_at`,
+        pollId,
+        elector.voterIdentityId,
+        elector.voterWid,
+        elector.displayLabel ?? null,
+        observedAt
+      );
+      insertPrivateIssuanceIfAbsent(db, {
+        pollId,
+        roundId,
+        elector,
+        createdAt: observedAt
+      });
+      db.run(
+        `UPDATE poll_private_issuances
+            SET status = 'pending',
+                voter_wid = CASE WHEN publication_started_at IS NULL THEN ? ELSE voter_wid END,
+                claim_token = NULL, lease_expires_at = NULL,
+                next_attempt_at = NULL, updated_at = ?, last_error = NULL
+          WHERE round_id = ? AND voter_identity_id = ?
+            AND status = 'failed' AND last_error = 'elector_left_before_cutoff'
+            AND poll_wa_message_id IS NULL`,
+        elector.voterWid,
+        observedAt,
+        roundId,
+        elector.voterIdentityId
+      );
+    }
+    const updated = db.run(
+      `UPDATE polls SET rolling_membership_observed_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'active' AND (
+          rolling_membership_observed_at IS NULL
+          OR julianday(rolling_membership_observed_at) < julianday(?)
+        )`,
+      observedAt,
+      observedAt,
+      pollId,
+      observedAt
+    );
+    if (updated.changes !== 1) {
+      throw new Error(`Rolling electorate for poll ${pollId} changed during reconciliation.`);
+    }
+    return true;
+  });
+}
+
+export function admitLatePollElector(db: PluginDatabase, input: {
+  pollId: string;
+  elector: PollElector;
+  admittedAt: string;
+  eventId: string;
+  maxElectorateSize: number;
+}): StoredPollPrivateIssuance | undefined {
+  const pollId = required(input.pollId, 'pollId');
+  const elector = pollElectorSchema.parse(input.elector);
+  const admittedAt = timestampSchema.parse(input.admittedAt);
+  if (!Number.isInteger(input.maxElectorateSize) || input.maxElectorateSize < 1) {
+    throw new Error('maxElectorateSize must be a positive integer.');
+  }
+  return db.transaction(() => {
+    const pollRow = db.get<PollRow>('SELECT * FROM polls WHERE id = ?', pollId);
+    if (!pollRow) {
+      return undefined;
+    }
+    const poll = pollFromRow(pollRow);
+    if (
+      poll.status !== 'active'
+      || poll.definition.ballotDelivery !== 'private'
+      || poll.definition.electorate.kind !== 'group_members_until_cutoff'
+    ) {
+      return undefined;
+    }
+    const round = db.get<PollRoundRow>(
+      `SELECT * FROM poll_rounds
+        WHERE poll_id = ? AND status IN ('publishing', 'open', 'finalizing')
+        ORDER BY round_number DESC LIMIT 1`,
+      pollId
+    );
+    if (!round || (round.closes_at && Date.parse(round.closes_at) <= Date.parse(admittedAt))) {
+      return undefined;
+    }
+    const existingElector = db.get(
+      `SELECT 1 FROM poll_electorate
+        WHERE poll_id = ? AND voter_identity_id = ?`,
+      pollId,
+      elector.voterIdentityId
+    );
+    const electorateSize = db.get<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM poll_electorate WHERE poll_id = ?',
+      pollId
+    )?.count ?? 0;
+    if (!existingElector && electorateSize >= input.maxElectorateSize) {
+      return undefined;
+    }
+    if (!recordPollMembershipTransition(db, {
+      pollId,
+      voterIdentityId: elector.voterIdentityId,
+      state: 'present',
+      occurredAt: admittedAt,
+      eventId: required(input.eventId, 'eventId')
+    })) {
+      return undefined;
+    }
+    fencePollFinalizationForMembershipTransition(db, round, admittedAt);
+    db.run(
+      `INSERT INTO poll_electorate (
+         poll_id, voter_identity_id, voter_wid, display_label, captured_at
+       ) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(poll_id, voter_identity_id) DO UPDATE SET
+         voter_wid = excluded.voter_wid,
+         display_label = COALESCE(excluded.display_label, poll_electorate.display_label)`,
+      pollId,
+      elector.voterIdentityId,
+      elector.voterWid,
+      elector.displayLabel ?? null,
+      admittedAt
+    );
+    insertPrivateIssuanceIfAbsent(db, {
+      pollId,
+      roundId: round.id,
+      elector,
+      createdAt: admittedAt
+    });
+    db.run(
+      `UPDATE poll_private_issuances
+          SET status = 'pending',
+              voter_wid = CASE WHEN publication_started_at IS NULL THEN ? ELSE voter_wid END,
+              claim_token = NULL,
+              lease_expires_at = NULL, next_attempt_at = NULL,
+              updated_at = ?, last_error = NULL
+        WHERE round_id = ? AND voter_identity_id = ?
+          AND status = 'failed' AND last_error = 'elector_left_before_cutoff'
+          AND poll_wa_message_id IS NULL`,
+      elector.voterWid,
+      admittedAt,
+      round.id,
+      elector.voterIdentityId
+    );
+    return getPollPrivateIssuanceByElector(db, round.id, elector.voterIdentityId);
+  });
+}
+
+export function listLateAdmissionPollIdsByChat(
+  db: PluginDatabase,
+  scopeId: string,
+  chatId: string,
+  now: string
+): string[] {
+  const checkedAt = timestampSchema.parse(now);
+  return db.all<{ id: string; definition_json: string; closes_at: string | null }>(
+    `SELECT p.id, p.definition_json, pr.closes_at
+      FROM polls p
+       JOIN poll_rounds pr ON pr.poll_id = p.id
+      WHERE p.scope_id = ? AND p.chat_id = ? AND p.status = 'active'
+        AND pr.status IN ('publishing', 'open', 'finalizing')
+      ORDER BY p.created_at ASC, p.id ASC`,
+    required(scopeId, 'scopeId'),
+    required(chatId, 'chatId')
+  ).filter((row) => {
+    const definition = pollDefinitionSchema.parse(parseJson(row.definition_json, 'poll definition'));
+    return definition.ballotDelivery === 'private'
+      && definition.electorate.kind === 'group_members_until_cutoff'
+      && (!row.closes_at || Date.parse(row.closes_at) > Date.parse(checkedAt));
+  }).map((row) => row.id);
+}
+
+export function removeLatePollElector(db: PluginDatabase, input: {
+  pollId: string;
+  voterIdentityId: string;
+  removedAt: string;
+  eventId: string;
+}): boolean {
+  const pollId = required(input.pollId, 'pollId');
+  const voterIdentityId = required(input.voterIdentityId, 'voterIdentityId');
+  const removedAt = timestampSchema.parse(input.removedAt);
+  return db.transaction(() => {
+    const pollRow = db.get<PollRow>('SELECT * FROM polls WHERE id = ?', pollId);
+    if (!pollRow) {
+      return false;
+    }
+    const poll = pollFromRow(pollRow);
+    if (
+      poll.status !== 'active'
+      || poll.definition.ballotDelivery !== 'private'
+      || poll.definition.electorate.kind !== 'group_members_until_cutoff'
+    ) {
+      return false;
+    }
+    const round = db.get<PollRoundRow>(
+      `SELECT * FROM poll_rounds
+        WHERE poll_id = ? AND status IN ('publishing', 'open', 'finalizing')
+        ORDER BY round_number DESC LIMIT 1`,
+      pollId
+    );
+    if (!round || (round.closes_at && Date.parse(round.closes_at) <= Date.parse(removedAt))) {
+      return false;
+    }
+    if (!recordPollMembershipTransition(db, {
+      pollId,
+      voterIdentityId,
+      state: 'absent',
+      occurredAt: removedAt,
+      eventId: required(input.eventId, 'eventId')
+    })) {
+      return false;
+    }
+    fencePollFinalizationForMembershipTransition(db, round, removedAt);
+    const removed = db.run(
+      'DELETE FROM poll_electorate WHERE poll_id = ? AND voter_identity_id = ?',
+      pollId,
+      voterIdentityId
+    );
+    if (removed.changes === 1) {
+      markPrivateIssuanceElectorRemoved(db, {
+        roundId: round.id,
+        voterIdentityId,
+        removedAt
+      });
+    }
+    return true;
+  });
+}
+
+export function listPollPrivateIssuancesByRound(
+  db: PluginDatabase,
+  roundId: string
+): StoredPollPrivateIssuance[] {
+  return db.all<PrivateIssuanceRow>(
+    `SELECT * FROM poll_private_issuances
+      WHERE round_id = ? ORDER BY voter_identity_id ASC`,
+    required(roundId, 'roundId')
+  ).map(privateIssuanceFromRow);
+}
+
+export function listPendingPollPrivatePublicationAuditIds(
+  db: PluginDatabase,
+  limit = 100
+): string[] {
+  return db.all<{ id: string }>(
+    `SELECT id FROM poll_private_issuances
+      WHERE status = 'sent' AND poll_wa_message_id IS NOT NULL
+        AND publication_audit_sent_at IS NULL
+      ORDER BY accepted_at ASC, id ASC LIMIT ?`,
+    normalizedLimit(limit)
+  ).map((row) => row.id);
+}
+
+export function markPollPrivatePublicationAuditSent(db: PluginDatabase, input: {
+  issuanceId: string;
+  sentAt: string;
+}): boolean {
+  const sentAt = timestampSchema.parse(input.sentAt);
+  const updated = db.run(
+    `UPDATE poll_private_issuances SET publication_audit_sent_at = ?, updated_at = ?
+      WHERE id = ? AND status = 'sent' AND poll_wa_message_id IS NOT NULL
+        AND publication_audit_sent_at IS NULL`,
+    sentAt,
+    sentAt,
+    required(input.issuanceId, 'issuanceId')
+  );
+  return updated.changes === 1;
+}
+
+export function listRecoverablePollPrivateIssuanceIds(db: PluginDatabase, input: {
+  now: string;
+  limit?: number | undefined;
+}): string[] {
+  const now = timestampSchema.parse(input.now);
+  const limit = normalizedLimit(input.limit);
+  return db.all<{ id: string }>(
+    `SELECT ppi.id
+       FROM poll_private_issuances ppi
+       JOIN poll_rounds pr ON pr.id = ppi.round_id
+       JOIN polls p ON p.id = ppi.poll_id
+      WHERE p.status = 'active' AND pr.status IN ('publishing', 'open')
+        AND ppi.poll_wa_message_id IS NULL AND (
+          (ppi.status IN ('pending', 'uncertain')
+            AND (ppi.next_attempt_at IS NULL OR julianday(ppi.next_attempt_at) <= julianday(?)))
+          OR (ppi.status = 'publishing' AND julianday(ppi.lease_expires_at) <= julianday(?))
+        )
+      ORDER BY ppi.created_at ASC, ppi.id ASC LIMIT ?`,
+    now,
+    now,
+    limit
+  ).map((row) => row.id);
+}
+
+export function getPollPrivateIssuance(
+  db: PluginDatabase,
+  issuanceId: string
+): StoredPollPrivateIssuance | undefined {
+  const row = db.get<PrivateIssuanceRow>(
+    'SELECT * FROM poll_private_issuances WHERE id = ?',
+    required(issuanceId, 'issuanceId')
+  );
+  return row ? privateIssuanceFromRow(row) : undefined;
+}
+
+export function getPollPrivateIssuanceByWhatsAppMessageId(
+  db: PluginDatabase,
+  pollWaMessageId: string
+): StoredPollPrivateIssuance | undefined {
+  const exact = db.get<PrivateIssuanceRow>(
+    'SELECT * FROM poll_private_issuances WHERE poll_wa_message_id = ?',
+    required(pollWaMessageId, 'pollWaMessageId')
+  );
+  if (exact) {
+    return privateIssuanceFromRow(exact);
+  }
+  const equivalent = db.all<PrivateIssuanceRow>(
+    `SELECT * FROM poll_private_issuances
+      WHERE poll_wa_message_id IS NOT NULL ORDER BY created_at DESC, id ASC`
+  ).find((row) => equivalentWhatsAppMessageIds(row.poll_wa_message_id ?? undefined, pollWaMessageId));
+  return equivalent ? privateIssuanceFromRow(equivalent) : undefined;
+}
+
+export function claimPollPrivateIssuance(db: PluginDatabase, input: {
+  issuanceId: string;
+  claimToken: string;
+  now: string;
+  leaseExpiresAt: string;
+}): StoredPollPrivateIssuance | undefined {
+  const issuanceId = required(input.issuanceId, 'issuanceId');
+  const claimToken = required(input.claimToken, 'claimToken');
+  const now = timestampSchema.parse(input.now);
+  const leaseExpiresAt = timestampSchema.parse(input.leaseExpiresAt);
+  if (Date.parse(leaseExpiresAt) <= Date.parse(now)) {
+    throw new Error('Private poll issuance lease must expire after it starts.');
+  }
+  return db.transaction(() => {
+    const updated = db.run(
+      `UPDATE poll_private_issuances
+          SET status = 'publishing', attempt = attempt + 1, claim_token = ?,
+              lease_expires_at = ?, next_attempt_at = NULL, updated_at = ?
+        WHERE id = ? AND poll_wa_message_id IS NULL AND (
+          status IN ('pending', 'uncertain')
+          OR (status = 'publishing' AND julianday(lease_expires_at) <= julianday(?))
+        ) AND (next_attempt_at IS NULL OR julianday(next_attempt_at) <= julianday(?))`,
+      claimToken,
+      leaseExpiresAt,
+      now,
+      issuanceId,
+      now,
+      now
+    );
+    return updated.changes === 1 ? getPollPrivateIssuance(db, issuanceId) : undefined;
+  });
+}
+
+export function renewPollPrivateIssuanceClaim(db: PluginDatabase, input: {
+  issuanceId: string;
+  claimToken: string;
+  now: string;
+  leaseExpiresAt: string;
+}): boolean {
+  const now = timestampSchema.parse(input.now);
+  const leaseExpiresAt = timestampSchema.parse(input.leaseExpiresAt);
+  if (Date.parse(leaseExpiresAt) <= Date.parse(now)) {
+    throw new Error('Renewed private poll issuance lease must expire after renewal.');
+  }
+  const renewed = db.run(
+    `UPDATE poll_private_issuances
+        SET lease_expires_at = ?, updated_at = ?
+      WHERE id = ? AND status = 'publishing' AND claim_token = ?
+        AND poll_wa_message_id IS NULL
+        AND julianday(lease_expires_at) > julianday(?)`,
+    leaseExpiresAt,
+    now,
+    required(input.issuanceId, 'issuanceId'),
+    required(input.claimToken, 'claimToken'),
+    now
+  );
+  return renewed.changes === 1;
+}
+
+export function startPollPrivateIssuanceAttempt(db: PluginDatabase, input: {
+  issuanceId: string;
+  claimToken: string;
+  startedAt: string;
+}): string {
+  const issuanceId = required(input.issuanceId, 'issuanceId');
+  const claimToken = required(input.claimToken, 'claimToken');
+  const startedAt = timestampSchema.parse(input.startedAt);
+  return db.transaction(() => {
+    const row = db.get<PrivateIssuanceRow>(
+      'SELECT * FROM poll_private_issuances WHERE id = ?',
+      issuanceId
+    );
+    if (!row || row.status !== 'publishing' || row.claim_token !== claimToken) {
+      throw new Error(`Private poll issuance claim ${issuanceId} was lost.`);
+    }
+    if (row.publication_started_at) {
+      return row.publication_started_at;
+    }
+    const updated = db.run(
+      `UPDATE poll_private_issuances SET publication_started_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'publishing' AND claim_token = ?
+          AND publication_started_at IS NULL AND poll_wa_message_id IS NULL`,
+      startedAt,
+      startedAt,
+      issuanceId,
+      claimToken
+    );
+    if (updated.changes !== 1) {
+      throw new Error(`Private poll issuance claim ${issuanceId} changed before provider invocation.`);
+    }
+    return startedAt;
+  });
+}
+
+export function markPollPrivateIssuanceSent(db: PluginDatabase, input: {
+  issuanceId: string;
+  claimToken: string;
+  pollWaMessageId: string;
+  remoteChatId?: string | undefined;
+  acceptedAt: string;
+}): boolean {
+  const acceptedAt = timestampSchema.parse(input.acceptedAt);
+  const result = db.run(
+    `UPDATE poll_private_issuances
+        SET status = 'sent', poll_wa_message_id = ?, remote_chat_id = ?, accepted_at = ?,
+            claim_token = NULL, lease_expires_at = NULL, next_attempt_at = NULL,
+            updated_at = ?, last_error = NULL
+      WHERE id = ? AND status = 'publishing' AND claim_token = ?
+        AND publication_started_at IS NOT NULL AND poll_wa_message_id IS NULL`,
+    required(input.pollWaMessageId, 'pollWaMessageId'),
+    input.remoteChatId?.trim() || null,
+    acceptedAt,
+    acceptedAt,
+    required(input.issuanceId, 'issuanceId'),
+    required(input.claimToken, 'claimToken')
+  );
+  return result.changes === 1;
+}
+
+export function reschedulePollPrivateIssuance(db: PluginDatabase, input: {
+  issuanceId: string;
+  claimToken: string;
+  status: 'pending' | 'uncertain';
+  nextAttemptAt: string;
+  error: string;
+  updatedAt: string;
+  resetPublicationAnchor?: boolean | undefined;
+}): boolean {
+  const updatedAt = timestampSchema.parse(input.updatedAt);
+  const nextAttemptAt = timestampSchema.parse(input.nextAttemptAt);
+  const result = db.run(
+    `UPDATE poll_private_issuances
+        SET status = ?, claim_token = NULL, lease_expires_at = NULL,
+            next_attempt_at = ?, publication_started_at = CASE WHEN ? THEN NULL ELSE publication_started_at END,
+            updated_at = ?, last_error = ?
+      WHERE id = ? AND status = 'publishing' AND claim_token = ? AND poll_wa_message_id IS NULL`,
+    input.status,
+    nextAttemptAt,
+    input.resetPublicationAnchor === true ? 1 : 0,
+    updatedAt,
+    required(input.error, 'error'),
+    required(input.issuanceId, 'issuanceId'),
+    required(input.claimToken, 'claimToken')
+  );
+  return result.changes === 1;
+}
+
+export function failPollPrivateIssuance(db: PluginDatabase, input: {
+  issuanceId: string;
+  claimToken: string;
+  error: string;
+  failedAt: string;
+}): boolean {
+  const failedAt = timestampSchema.parse(input.failedAt);
+  const result = db.run(
+    `UPDATE poll_private_issuances
+        SET status = 'failed', claim_token = NULL, lease_expires_at = NULL,
+            next_attempt_at = NULL, updated_at = ?, last_error = ?
+      WHERE id = ? AND status = 'publishing' AND claim_token = ? AND poll_wa_message_id IS NULL`,
+    failedAt,
+    required(input.error, 'error'),
+    required(input.issuanceId, 'issuanceId'),
+    required(input.claimToken, 'claimToken')
+  );
+  return result.changes === 1;
+}
+
+export function reconcilePollPrivateIssuanceAtCutoff(db: PluginDatabase, input: {
+  roundId: string;
+  finalizationClaimToken: string;
+  issuanceId: string;
+  resolution: 'found' | 'absent';
+  pollWaMessageId?: string | undefined;
+  remoteChatId?: string | undefined;
+  acceptedAt?: string | undefined;
+  reconciledAt: string;
+}): boolean {
+  const roundId = required(input.roundId, 'roundId');
+  const finalizationClaimToken = required(
+    input.finalizationClaimToken,
+    'finalizationClaimToken'
+  );
+  const issuanceId = required(input.issuanceId, 'issuanceId');
+  const reconciledAt = timestampSchema.parse(input.reconciledAt);
+  const acceptedAt = input.resolution === 'found'
+    ? timestampSchema.parse(required(input.acceptedAt ?? '', 'acceptedAt'))
+    : undefined;
+  const pollWaMessageId = input.resolution === 'found'
+    ? required(input.pollWaMessageId ?? '', 'pollWaMessageId')
+    : undefined;
+  return db.transaction(() => {
+    const round = db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ?', roundId);
+    if (
+      !round
+      || round.status !== 'finalizing'
+      || round.finalization_claim_token !== finalizationClaimToken
+    ) {
+      return false;
+    }
+    const issuance = db.get<PrivateIssuanceRow>(
+      'SELECT * FROM poll_private_issuances WHERE id = ?',
+      issuanceId
+    );
+    if (
+      !issuance
+      || issuance.round_id !== roundId
+      || issuance.poll_id !== round.poll_id
+      || issuance.poll_wa_message_id
+      || !['pending', 'publishing', 'uncertain'].includes(issuance.status)
+    ) {
+      return false;
+    }
+    if (input.resolution === 'found') {
+      if (!issuance.publication_started_at) {
+        throw new Error(
+          `Private poll issuance ${issuanceId} has a provider receipt without a durable attempt anchor.`
+        );
+      }
+      const updated = db.run(
+        `UPDATE poll_private_issuances
+            SET status = 'sent', poll_wa_message_id = ?, remote_chat_id = ?, accepted_at = ?,
+                claim_token = NULL, lease_expires_at = NULL, next_attempt_at = NULL,
+                updated_at = ?, last_error = NULL
+          WHERE id = ? AND round_id = ? AND poll_wa_message_id IS NULL
+            AND publication_started_at IS NOT NULL
+            AND status IN ('pending', 'publishing', 'uncertain')`,
+        pollWaMessageId!,
+        input.remoteChatId?.trim() || null,
+        acceptedAt!,
+        reconciledAt,
+        issuanceId,
+        roundId
+      );
+      return updated.changes === 1;
+    }
+    const updated = db.run(
+      `UPDATE poll_private_issuances
+          SET status = 'failed', claim_token = NULL, lease_expires_at = NULL,
+              next_attempt_at = NULL, updated_at = ?, last_error = 'not_issued_before_cutoff'
+        WHERE id = ? AND round_id = ? AND poll_wa_message_id IS NULL
+          AND status IN ('pending', 'publishing', 'uncertain')`,
+      reconciledAt,
+      issuanceId,
+      roundId
+    );
+    return updated.changes === 1;
+  });
+}
+
+export function markPrivatePollRoundPublished(db: PluginDatabase, input: {
+  roundId: string;
+  claimToken: string;
+  acceptedAt: string;
+}): boolean {
+  const acceptedAt = timestampSchema.parse(input.acceptedAt);
+  return db.transaction(() => {
+    const round = db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ?', input.roundId);
+    if (
+      !round
+      || round.status !== 'publishing'
+      || round.publication_claim_token !== input.claimToken
+      || !round.electorate_captured_at
+      || !round.publication_started_at
+    ) {
+      return false;
+    }
+    const issuanceCount = db.get<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM poll_private_issuances WHERE round_id = ?',
+      round.id
+    )?.count ?? 0;
+    if (issuanceCount === 0) {
+      return false;
+    }
+    const poll = pollFromRow(db.get<PollRow>('SELECT * FROM polls WHERE id = ?', round.poll_id)!);
+    const closesAt = poll.definition.closing.kind === 'deadline'
+      && poll.definition.closing.deadline.mode === 'after_publish'
+      ? new Date(
+          Date.parse(round.publication_started_at)
+            + poll.definition.closing.deadline.durationMinutes * 60_000
+        ).toISOString()
+      : round.closes_at;
+    const updated = db.run(
+      `UPDATE poll_rounds
+          SET status = 'open', published_at = ?, closes_at = ?, publication_outcome = 'accepted',
+              publication_claim_token = NULL, publication_lease_expires_at = NULL,
+              publication_next_attempt_at = NULL, updated_at = ?, last_error = NULL
+        WHERE id = ? AND status = 'publishing' AND publication_claim_token = ?`,
+      acceptedAt,
+      closesAt,
+      acceptedAt,
+      round.id,
+      input.claimToken
+    );
+    return updated.changes === 1;
+  });
+}
+
+function getPollPrivateIssuanceByElector(
+  db: PluginDatabase,
+  roundId: string,
+  voterIdentityId: string
+): StoredPollPrivateIssuance | undefined {
+  const row = db.get<PrivateIssuanceRow>(
+    `SELECT * FROM poll_private_issuances
+      WHERE round_id = ? AND voter_identity_id = ?`,
+    roundId,
+    voterIdentityId
+  );
+  return row ? privateIssuanceFromRow(row) : undefined;
+}
+
+function recordPollMembershipTransition(db: PluginDatabase, input: {
+  pollId: string;
+  voterIdentityId: string;
+  state: 'present' | 'absent';
+  occurredAt: string;
+  eventId: string;
+}): boolean {
+  const occurredAt = timestampSchema.parse(input.occurredAt);
+  const eventId = required(input.eventId, 'eventId');
+  const recorded = db.run(
+    `INSERT INTO poll_membership_transitions (
+       poll_id, voter_identity_id, state, occurred_at, event_id
+     ) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(poll_id, voter_identity_id) DO UPDATE SET
+       state = excluded.state,
+       occurred_at = excluded.occurred_at,
+       event_id = excluded.event_id
+     WHERE julianday(excluded.occurred_at) > julianday(poll_membership_transitions.occurred_at)
+       OR (
+         excluded.occurred_at = poll_membership_transitions.occurred_at
+         AND excluded.event_id > poll_membership_transitions.event_id
+       )`,
+    required(input.pollId, 'pollId'),
+    required(input.voterIdentityId, 'voterIdentityId'),
+    input.state,
+    occurredAt,
+    eventId
+  );
+  return recorded.changes === 1;
+}
+
+function fencePollFinalizationForMembershipTransition(
+  db: PluginDatabase,
+  round: PollRoundRow,
+  occurredAt: string
+): void {
+  if (round.status !== 'finalizing') {
+    return;
+  }
+  db.run(
+    `UPDATE poll_rounds
+        SET status = 'open', finalization_claim_token = NULL,
+            finalization_lease_expires_at = NULL,
+            finalization_next_attempt_at = ?, updated_at = ?,
+            last_error = 'electorate_changed_during_finalization'
+      WHERE id = ? AND status = 'finalizing'`,
+    occurredAt,
+    occurredAt,
+    round.id
+  );
+}
+
+function markPrivateIssuanceElectorRemoved(db: PluginDatabase, input: {
+  roundId: string;
+  voterIdentityId: string;
+  removedAt: string;
+}): void {
+  db.run(
+    `UPDATE poll_private_issuances
+        SET status = CASE
+              WHEN publication_started_at IS NULL THEN 'failed'
+              ELSE 'uncertain'
+            END,
+            claim_token = NULL, lease_expires_at = NULL,
+            next_attempt_at = CASE
+              WHEN publication_started_at IS NULL THEN NULL
+              ELSE ?
+            END,
+            updated_at = ?, last_error = 'elector_left_before_cutoff'
+      WHERE round_id = ? AND voter_identity_id = ?
+        AND poll_wa_message_id IS NULL
+        AND status IN ('pending', 'publishing', 'uncertain')`,
+    input.removedAt,
+    input.removedAt,
+    input.roundId,
+    input.voterIdentityId
+  );
+}
+
+function insertPrivateIssuanceIfAbsent(db: PluginDatabase, input: {
+  pollId: string;
+  roundId: string;
+  elector: PollElector;
+  createdAt: string;
+}): void {
+  const identityDigest = createHash('sha256').update(input.elector.voterIdentityId).digest('hex');
+  db.run(
+    `INSERT OR IGNORE INTO poll_private_issuances (
+       id, poll_id, round_id, voter_identity_id, voter_wid, publish_idempotency_key,
+       status, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+    `poll-private:${input.roundId}:${identityDigest}`,
+    input.pollId,
+    input.roundId,
+    input.elector.voterIdentityId,
+    input.elector.voterWid,
+    `poll-assistant:private:${input.roundId}:${identityDigest}`,
+    input.createdAt,
+    input.createdAt
+  );
 }
 
 export function failPollRoundPublication(db: PluginDatabase, input: {
@@ -1490,6 +2591,36 @@ export function claimPollRoundFinalization(db: PluginDatabase, input: {
   });
 }
 
+/**
+ * Extends an unexpired finalization claim while a worker performs authoritative
+ * readback. Private ballots can require one transport read per elector, so the
+ * original short lease must not expire merely because the electorate is large.
+ */
+export function renewPollRoundFinalizationClaim(db: PluginDatabase, input: {
+  roundId: string;
+  claimToken: string;
+  now: string;
+  leaseExpiresAt: string;
+}): boolean {
+  const now = timestampSchema.parse(input.now);
+  const leaseExpiresAt = timestampSchema.parse(input.leaseExpiresAt);
+  if (Date.parse(leaseExpiresAt) <= Date.parse(now)) {
+    throw new Error('Renewed finalization lease must expire after renewal.');
+  }
+  const renewed = db.run(
+    `UPDATE poll_rounds
+        SET finalization_lease_expires_at = ?, updated_at = ?
+      WHERE id = ? AND status = 'finalizing' AND finalization_claim_token = ?
+        AND julianday(finalization_lease_expires_at) > julianday(?)`,
+    leaseExpiresAt,
+    now,
+    required(input.roundId, 'roundId'),
+    required(input.claimToken, 'claimToken'),
+    now
+  );
+  return renewed.changes === 1;
+}
+
 export function requestPollRoundClose(db: PluginDatabase, input: {
   roundId: string;
   requestedAt: string;
@@ -1558,6 +2689,7 @@ export function completePollRoundFinalization(db: PluginDatabase, input: {
   inputSha256: string;
   readbackSource: 'events' | 'transport_readback';
   delivery: PollDeliveryIntent;
+  additionalDeliveries?: readonly PollDeliveryIntent[] | undefined;
   completedAt: string;
 }): CompletePollRoundResult {
   const resultDocument = pollResultSchema.parse(input.result);
@@ -1566,6 +2698,22 @@ export function completePollRoundFinalization(db: PluginDatabase, input: {
   const inputSha256 = sha256Schema.parse(input.inputSha256);
   const completedAt = timestampSchema.parse(input.completedAt);
   validateDeliveryIntent(input.delivery);
+  const deliveries = [input.delivery, ...(input.additionalDeliveries ?? [])];
+  deliveries.forEach(validateDeliveryIntent);
+  requireDistinct(deliveries.map((delivery) => delivery.id), 'Poll delivery ids');
+  requireDistinct(deliveries.map((delivery) => delivery.deliveryKey), 'Poll delivery keys');
+  requireDistinct(deliveries.map((delivery) => delivery.idempotencyKey), 'Poll delivery idempotency keys');
+  if (deliveries.slice(1).some((delivery) =>
+    delivery.kind !== 'result' || delivery.chatId !== input.delivery.chatId)) {
+    throw new Error('Additional result pages must target the primary result chat.');
+  }
+  if (deliveries.length > 1) {
+    const batchKey = input.delivery.deliveryBatchKey;
+    if (!batchKey || deliveries.some((delivery, index) =>
+      delivery.deliveryBatchKey !== batchKey || delivery.deliverySequence !== index)) {
+      throw new Error('Paginated result deliveries require one contiguous ordered batch.');
+    }
+  }
   if (resultDocument.roundId !== roundId) {
     throw new Error('Poll result roundId does not match the finalization round.');
   }
@@ -1587,6 +2735,7 @@ export function completePollRoundFinalization(db: PluginDatabase, input: {
       if (!sameResult || existing.input_sha256 !== inputSha256) {
         throw new Error(`Poll round ${roundId} already has a different immutable result.`);
       }
+      ensurePollRandomDrawAuditIntent(db, roundId, resultDocument, completedAt);
       return 'already_completed';
     }
     const round = db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ?', roundId);
@@ -1614,6 +2763,7 @@ export function completePollRoundFinalization(db: PluginDatabase, input: {
       input.readbackSource,
       completedAt
     );
+    ensurePollRandomDrawAuditIntent(db, roundId, resultDocument, completedAt);
     db.run(
       `UPDATE poll_rounds
           SET status = ?, finalized_at = ?, finalization_claim_token = NULL,
@@ -1634,9 +2784,107 @@ export function completePollRoundFinalization(db: PluginDatabase, input: {
       completedAt,
       round.poll_id
     );
-    insertDelivery(db, round.poll_id, roundId, input.delivery, completedAt);
+    deliveries.forEach((delivery) => insertDelivery(
+      db,
+      round.poll_id,
+      roundId,
+      delivery,
+      completedAt
+    ));
     return 'completed';
   });
+}
+
+export function listPendingPollRandomDrawAudits(
+  db: PluginDatabase,
+  limit = 100
+): StoredPollRandomDrawAudit[] {
+  const normalized = normalizedLimit(limit);
+  return db.all<{
+    round_id: string;
+    event_key: string;
+    created_at: string;
+    sent_at: string | null;
+  }>(
+    `SELECT round_id, event_key, created_at, sent_at
+       FROM poll_random_draw_audits
+      WHERE status = 'pending'
+      ORDER BY created_at ASC, round_id ASC LIMIT ?`,
+    normalized
+  ).map((row) => ({
+    roundId: row.round_id,
+    eventKey: row.event_key,
+    createdAt: row.created_at,
+    ...(row.sent_at ? { sentAt: row.sent_at } : {})
+  }));
+}
+
+export function getPollRandomDrawAudit(
+  db: PluginDatabase,
+  roundId: string
+): StoredPollRandomDrawAudit | undefined {
+  const row = db.get<{
+    round_id: string;
+    event_key: string;
+    created_at: string;
+    sent_at: string | null;
+  }>(
+    `SELECT round_id, event_key, created_at, sent_at
+       FROM poll_random_draw_audits WHERE round_id = ?`,
+    required(roundId, 'roundId')
+  );
+  return row ? {
+    roundId: row.round_id,
+    eventKey: row.event_key,
+    createdAt: row.created_at,
+    ...(row.sent_at ? { sentAt: row.sent_at } : {})
+  } : undefined;
+}
+
+export function markPollRandomDrawAuditSent(db: PluginDatabase, input: {
+  roundId: string;
+  eventKey: string;
+  sentAt: string;
+}): boolean {
+  const sentAt = timestampSchema.parse(input.sentAt);
+  const updated = db.run(
+    `UPDATE poll_random_draw_audits
+        SET status = 'sent', sent_at = ?
+      WHERE round_id = ? AND event_key = ? AND status = 'pending'`,
+    sentAt,
+    required(input.roundId, 'roundId'),
+    required(input.eventKey, 'eventKey')
+  );
+  return updated.changes === 1;
+}
+
+function ensurePollRandomDrawAuditIntent(
+  db: PluginDatabase,
+  roundId: string,
+  result: PollResult,
+  createdAt: string
+): void {
+  const round = db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ?', roundId);
+  if (!round) {
+    throw new Error(`Poll round ${roundId} disappeared while recording its result.`);
+  }
+  const pollRow = db.get<PollRow>('SELECT * FROM polls WHERE id = ?', round.poll_id);
+  if (!pollRow) {
+    throw new Error(`Poll ${round.poll_id} disappeared while recording its result.`);
+  }
+  const trace = describePollRandomDraw(pollFromRow(pollRow).definition, result);
+  if (!trace) {
+    return;
+  }
+  const eventKey = `poll-assistant:random-draw:${roundId}:${trace.drawDigest}`;
+  db.run(
+    `INSERT OR IGNORE INTO poll_random_draw_audits (
+       round_id, event_key, status, created_at
+     ) VALUES (?, ?, 'pending', ?)`,
+    roundId,
+    eventKey,
+    timestampSchema.parse(createdAt)
+  );
 }
 
 export function getPollResult(db: PluginDatabase, roundId: string): PollResult | undefined {
@@ -1647,6 +2895,164 @@ export function getPollResult(db: PluginDatabase, roundId: string): PollResult |
   return row
     ? pollResultSchema.parse(parseJson(row.result_json, 'poll result'))
     : undefined;
+}
+
+export function getPollAutomationAction<T>(db: PluginDatabase, input: {
+  pollId: string;
+  kind: 'resolve_outcome' | 'cancel';
+}): { idempotencyKey: string; requestSha256: string; response: T; createdAt: string } | undefined {
+  const row = db.get<{
+    idempotency_key: string;
+    request_sha256: string;
+    response_json: string;
+    created_at: string;
+  }>(
+    'SELECT * FROM poll_automation_actions WHERE poll_id = ? AND kind = ?',
+    required(input.pollId, 'pollId'),
+    input.kind
+  );
+  return row ? {
+    idempotencyKey: row.idempotency_key,
+    requestSha256: row.request_sha256,
+    response: parseJson(row.response_json, 'poll automation action response') as T,
+    createdAt: row.created_at
+  } : undefined;
+}
+
+export function recordPollAutomationAction<T>(db: PluginDatabase, input: {
+  pollId: string;
+  kind: 'resolve_outcome' | 'cancel';
+  idempotencyKey: string;
+  requestSha256: string;
+  response: T;
+  createdAt: string;
+}): { inserted: boolean; response: T } {
+  const pollId = required(input.pollId, 'pollId');
+  const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
+  const requestSha256 = sha256Schema.parse(input.requestSha256);
+  const createdAt = timestampSchema.parse(input.createdAt);
+  return db.transaction(() => {
+    const existing = getPollAutomationAction<T>(db, { pollId, kind: input.kind });
+    if (existing) {
+      if (existing.idempotencyKey !== idempotencyKey || existing.requestSha256 !== requestSha256) {
+        throw new Error(`Poll automation ${input.kind} is already bound to different input.`);
+      }
+      return { inserted: false, response: existing.response };
+    }
+    db.run(
+      `INSERT INTO poll_automation_actions (
+         poll_id, kind, idempotency_key, request_sha256, response_json, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?)`,
+      pollId,
+      input.kind,
+      idempotencyKey,
+      requestSha256,
+      JSON.stringify(input.response),
+      createdAt
+    );
+    return { inserted: true, response: input.response };
+  });
+}
+
+export function completeActorPollOutcome(db: PluginDatabase, input: {
+  pollId: string;
+  result: PollResult;
+  inputSha256: string;
+  actionIdempotencyKey: string;
+  actionRequestSha256: string;
+  actionResponse: unknown;
+  delivery: PollDeliveryIntent;
+  completedAt: string;
+}): 'completed' | 'existing' {
+  const pollId = required(input.pollId, 'pollId');
+  const result = pollResultSchema.parse(input.result);
+  const inputSha256 = sha256Schema.parse(input.inputSha256);
+  const completedAt = timestampSchema.parse(input.completedAt);
+  validateDeliveryIntent(input.delivery);
+  return db.transaction(() => {
+    const action = getPollAutomationAction(db, { pollId, kind: 'resolve_outcome' });
+    if (action) {
+      if (
+        action.idempotencyKey !== input.actionIdempotencyKey
+        || action.requestSha256 !== input.actionRequestSha256
+      ) {
+        throw new Error('Actor outcome is already bound to different idempotent input.');
+      }
+      return 'existing';
+    }
+    const pollRow = db.get<PollRow>('SELECT * FROM polls WHERE id = ?', pollId);
+    if (!pollRow) {
+      throw new Error(`Poll ${pollId} does not exist.`);
+    }
+    const poll = pollFromRow(pollRow);
+    if (
+      poll.definition.electorate.kind !== 'actor'
+      || poll.definition.ballotDelivery !== 'private'
+    ) {
+      throw new Error('Direct actor outcome resolution requires an actor-only private poll.');
+    }
+    const round = db.get<PollRoundRow>(
+      'SELECT * FROM poll_rounds WHERE poll_id = ? ORDER BY round_number DESC LIMIT 1',
+      pollId
+    );
+    if (!round || result.roundId !== round.id || result.pollId !== pollId) {
+      throw new Error('Actor outcome result does not match the poll lifecycle.');
+    }
+    const existingResult = db.get<{ result_json: string; input_sha256: string }>(
+      'SELECT result_json, input_sha256 FROM poll_results WHERE round_id = ?',
+      round.id
+    );
+    if (existingResult) {
+      if (
+        existingResult.input_sha256 !== inputSha256
+        || JSON.stringify(pollResultSchema.parse(parseJson(existingResult.result_json, 'poll result')))
+          !== JSON.stringify(result)
+      ) {
+        throw new Error('Actor-only poll already has a different immutable outcome.');
+      }
+    } else {
+      db.run(
+        `INSERT INTO poll_results (
+           round_id, poll_id, result_json, input_sha256, cutoff_at, readback_source, created_at
+         ) VALUES (?, ?, ?, ?, ?, 'events', ?)`,
+        round.id,
+        pollId,
+        JSON.stringify(result),
+        inputSha256,
+        result.cutoffAt,
+        completedAt
+      );
+      db.run(
+        `UPDATE poll_rounds
+            SET status = 'finalized', closes_at = COALESCE(closes_at, ?), finalized_at = ?,
+                publication_claim_token = NULL, publication_lease_expires_at = NULL,
+                finalization_claim_token = NULL, finalization_lease_expires_at = NULL,
+                updated_at = ?, last_error = NULL
+          WHERE id = ? AND status NOT IN ('cancelled', 'failed')`,
+        completedAt,
+        completedAt,
+        completedAt,
+        round.id
+      );
+      db.run(
+        `UPDATE polls SET status = 'resolved', resolved_at = ?, updated_at = ?, last_error = NULL
+          WHERE id = ? AND status NOT IN ('cancelled', 'failed')`,
+        completedAt,
+        completedAt,
+        pollId
+      );
+      insertDelivery(db, pollId, round.id, input.delivery, completedAt);
+    }
+    recordPollAutomationAction(db, {
+      pollId,
+      kind: 'resolve_outcome',
+      idempotencyKey: input.actionIdempotencyKey,
+      requestSha256: input.actionRequestSha256,
+      response: input.actionResponse,
+      createdAt: completedAt
+    });
+    return existingResult ? 'existing' : 'completed';
+  });
 }
 
 export function claimNextPollDelivery(db: PluginDatabase, input: {
@@ -1662,12 +3068,20 @@ export function claimNextPollDelivery(db: PluginDatabase, input: {
   }
   return db.transaction(() => {
     const candidate = db.get<DeliveryRow>(
-      `SELECT * FROM poll_deliveries
+      `SELECT d.* FROM poll_deliveries d
         WHERE (
-          (status = 'pending' AND (next_attempt_at IS NULL OR julianday(next_attempt_at) <= julianday(?)))
-          OR (status = 'sending' AND julianday(lease_expires_at) <= julianday(?))
+          (d.status = 'pending' AND (d.next_attempt_at IS NULL OR julianday(d.next_attempt_at) <= julianday(?)))
+          OR (d.status = 'sending' AND julianday(d.lease_expires_at) <= julianday(?))
         )
-        ORDER BY created_at ASC, id ASC
+          AND (
+            d.delivery_batch_key IS NULL OR NOT EXISTS (
+              SELECT 1 FROM poll_deliveries previous
+               WHERE previous.delivery_batch_key = d.delivery_batch_key
+                 AND previous.delivery_sequence < d.delivery_sequence
+                 AND previous.status <> 'sent'
+            )
+          )
+        ORDER BY d.created_at ASC, d.id ASC
         LIMIT 1`,
       now,
       now
@@ -1711,21 +3125,38 @@ export function claimPollDeliveryById(db: PluginDatabase, input: {
     throw new Error('Delivery lease must expire after it starts.');
   }
   return db.transaction(() => {
+    const candidate = db.get<DeliveryRow>(
+      `SELECT d.* FROM poll_deliveries d
+        WHERE d.id = ? AND (
+          (d.status = 'pending'
+            AND (d.next_attempt_at IS NULL OR julianday(d.next_attempt_at) <= julianday(?)))
+          OR (d.status = 'sending' AND julianday(d.lease_expires_at) <= julianday(?))
+        ) AND (
+          d.delivery_batch_key IS NULL OR NOT EXISTS (
+            SELECT 1 FROM poll_deliveries previous
+             WHERE previous.delivery_batch_key = d.delivery_batch_key
+               AND previous.delivery_sequence < d.delivery_sequence
+               AND previous.status <> 'sent'
+          )
+        )`,
+      deliveryId,
+      now,
+      now
+    );
+    if (!candidate) {
+      return undefined;
+    }
     const claimed = db.run(
       `UPDATE poll_deliveries
           SET status = 'sending', attempt = attempt + 1, claim_token = ?,
               lease_expires_at = ?, updated_at = ?, last_error = NULL
-        WHERE id = ? AND (
-          (status = 'pending'
-            AND (next_attempt_at IS NULL OR julianday(next_attempt_at) <= julianday(?)))
-          OR (status = 'sending' AND julianday(lease_expires_at) <= julianday(?))
-        )`,
+        WHERE id = ? AND status = ? AND COALESCE(claim_token, '') = COALESCE(?, '')`,
       claimToken,
       leaseExpiresAt,
       now,
       deliveryId,
-      now,
-      now
+      candidate.status,
+      candidate.claim_token
     );
     if (claimed.changes !== 1) {
       return undefined;
@@ -1746,13 +3177,20 @@ export function listRecoverablePollDeliveryIds(db: PluginDatabase, input: {
 }): string[] {
   const now = timestampSchema.parse(input.now);
   return db.all<{ id: string }>(
-    `SELECT id FROM poll_deliveries
+    `SELECT d.id FROM poll_deliveries d
       WHERE (
-        (status = 'pending' AND (next_attempt_at IS NULL OR julianday(next_attempt_at) <= julianday(?)))
-        OR (status = 'sending' AND julianday(lease_expires_at) <= julianday(?))
-        OR status = 'uncertain'
+        (d.status = 'pending' AND (d.next_attempt_at IS NULL OR julianday(d.next_attempt_at) <= julianday(?)))
+        OR (d.status = 'sending' AND julianday(d.lease_expires_at) <= julianday(?))
+        OR d.status = 'uncertain'
+      ) AND (
+        d.delivery_batch_key IS NULL OR NOT EXISTS (
+          SELECT 1 FROM poll_deliveries previous
+           WHERE previous.delivery_batch_key = d.delivery_batch_key
+             AND previous.delivery_sequence < d.delivery_sequence
+             AND previous.status <> 'sent'
+        )
       )
-      ORDER BY created_at ASC, id ASC
+      ORDER BY d.created_at ASC, d.id ASC
       LIMIT ?`,
     now,
     now,
@@ -1866,6 +3304,19 @@ export function getPollDelivery(db: PluginDatabase, deliveryId: string): StoredP
   return row ? deliveryFromRow(row) : undefined;
 }
 
+export function getNextPendingPollDeliveryInBatch(
+  db: PluginDatabase,
+  deliveryBatchKey: string
+): StoredPollDelivery | undefined {
+  const row = db.get<DeliveryRow>(
+    `SELECT * FROM poll_deliveries
+      WHERE delivery_batch_key = ? AND status <> 'sent'
+      ORDER BY delivery_sequence ASC LIMIT 1`,
+    required(deliveryBatchKey, 'deliveryBatchKey')
+  );
+  return row?.status === 'pending' ? deliveryFromRow(row) : undefined;
+}
+
 export function resolvePollTie(db: PluginDatabase, input: {
   roundId: string;
   selectedOptionIds: readonly string[];
@@ -1933,15 +3384,16 @@ function requireTieResultDeliverySent(db: PluginDatabase, round: PollRoundRow): 
   if (round.status !== 'tie_pending') {
     return;
   }
-  const tieDelivery = db.get<{ status: PollDeliveryStatus }>(
-    `SELECT status FROM poll_deliveries
-      WHERE id = ? AND round_id = ? AND kind = 'tie'`,
-    `poll-result:${round.id}`,
+  const resultDeliveries = db.get<{ total: number; pending: number }>(
+    `SELECT COUNT(*) AS total,
+            SUM(CASE WHEN status = 'sent' THEN 0 ELSE 1 END) AS pending
+       FROM poll_deliveries
+      WHERE round_id = ? AND kind IN ('tie', 'result')`,
     round.id
   );
-  if (tieDelivery?.status !== 'sent') {
+  if (!resultDeliveries?.total || resultDeliveries.pending > 0) {
     throw new PollTieResultDeliveryPendingError(
-      `Poll round ${round.id} cannot transition before its tie result is delivered.`
+      `Poll round ${round.id} cannot transition before every result page is delivered.`
     );
   }
 }
@@ -1956,8 +3408,9 @@ function insertDelivery(
   db.run(
     `INSERT INTO poll_deliveries (
        id, poll_id, round_id, kind, delivery_key, chat_id, text,
-       idempotency_key, status, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+       idempotency_key, status, next_attempt_at, delivery_batch_key,
+       delivery_sequence, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
     delivery.id,
     pollId,
     roundId,
@@ -1966,6 +3419,9 @@ function insertDelivery(
     delivery.chatId,
     delivery.text,
     delivery.idempotencyKey,
+    delivery.notBefore ?? null,
+    delivery.deliveryBatchKey ?? null,
+    delivery.deliverySequence ?? null,
     createdAt,
     createdAt
   );
@@ -1977,6 +3433,20 @@ function validateDeliveryIntent(delivery: PollDeliveryIntent): void {
   required(delivery.chatId, 'delivery.chatId');
   required(delivery.text, 'delivery.text');
   required(delivery.idempotencyKey, 'delivery.idempotencyKey');
+  if (delivery.notBefore !== undefined) {
+    timestampSchema.parse(delivery.notBefore);
+  }
+  const hasBatchKey = delivery.deliveryBatchKey !== undefined;
+  const hasSequence = delivery.deliverySequence !== undefined;
+  if (hasBatchKey !== hasSequence) {
+    throw new Error('Delivery batch key and sequence must be configured together.');
+  }
+  if (hasBatchKey) {
+    required(delivery.deliveryBatchKey!, 'delivery.deliveryBatchKey');
+    if (!Number.isInteger(delivery.deliverySequence) || delivery.deliverySequence! < 0) {
+      throw new Error('Delivery sequence must be a non-negative integer.');
+    }
+  }
   if (!['result', 'tie', 'cancelled', 'failure'].includes(delivery.kind)) {
     throw new Error(`Invalid poll delivery kind ${delivery.kind}.`);
   }
@@ -2008,7 +3478,16 @@ function pollFromRow(row: PollRow): StoredPoll {
     ...(row.cancelled_by_wid ? { cancelledByWid: row.cancelled_by_wid } : {}),
     ...(row.cancel_reason ? { cancelReason: row.cancel_reason } : {}),
     ...(row.ballots_purged_at ? { ballotsPurgedAt: row.ballots_purged_at } : {}),
-    ...(row.last_error ? { lastError: row.last_error } : {})
+    ...(row.last_error ? { lastError: row.last_error } : {}),
+    ...(row.source_plugin_id && row.source_idempotency_key && row.source_request_sha256
+      ? {
+          source: {
+            pluginId: row.source_plugin_id,
+            idempotencyKey: row.source_idempotency_key,
+            requestSha256: sha256Schema.parse(row.source_request_sha256)
+          }
+        }
+      : {})
   };
 }
 
@@ -2073,11 +3552,41 @@ function deliveryFromRow(row: DeliveryRow): StoredPollDelivery {
     ...(row.claim_token ? { claimToken: row.claim_token } : {}),
     ...(row.lease_expires_at ? { leaseExpiresAt: row.lease_expires_at } : {}),
     ...(row.next_attempt_at ? { nextAttemptAt: row.next_attempt_at } : {}),
+    ...(row.delivery_batch_key ? { deliveryBatchKey: row.delivery_batch_key } : {}),
+    ...(row.delivery_sequence !== null
+      ? { deliverySequence: row.delivery_sequence }
+      : {}),
     ...(row.message_id ? { messageId: row.message_id } : {}),
     ...(row.last_error ? { lastError: row.last_error } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     ...(row.sent_at ? { sentAt: row.sent_at } : {})
+  };
+}
+
+function privateIssuanceFromRow(row: PrivateIssuanceRow): StoredPollPrivateIssuance {
+  return {
+    id: row.id,
+    pollId: row.poll_id,
+    roundId: row.round_id,
+    voterIdentityId: row.voter_identity_id,
+    voterWid: row.voter_wid,
+    publishIdempotencyKey: row.publish_idempotency_key,
+    status: row.status,
+    attempt: row.attempt,
+    ...(row.claim_token ? { claimToken: row.claim_token } : {}),
+    ...(row.lease_expires_at ? { leaseExpiresAt: row.lease_expires_at } : {}),
+    ...(row.next_attempt_at ? { nextAttemptAt: row.next_attempt_at } : {}),
+    ...(row.publication_started_at ? { publicationStartedAt: row.publication_started_at } : {}),
+    ...(row.poll_wa_message_id ? { pollWaMessageId: row.poll_wa_message_id } : {}),
+    ...(row.remote_chat_id ? { remoteChatId: row.remote_chat_id } : {}),
+    ...(row.accepted_at ? { acceptedAt: row.accepted_at } : {}),
+    ...(row.publication_audit_sent_at
+      ? { publicationAuditSentAt: row.publication_audit_sent_at }
+      : {}),
+    ...(row.last_error ? { lastError: row.last_error } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
   };
 }
 
@@ -2119,6 +3628,7 @@ function matchesCreateInput(existing: StoredPollAggregate, input: {
   creatorLabel: string;
   roundId: string;
   publishIdempotencyKey: string;
+  source?: CreatePollInput['source'];
   createdAt: string;
 }): boolean {
   const firstRound = existing.rounds.find((round) => round.roundNumber === 1);
@@ -2135,6 +3645,7 @@ function matchesCreateInput(existing: StoredPollAggregate, input: {
     && JSON.stringify(existing.poll.definition) === JSON.stringify(input.definition)
     && firstRound.id === input.roundId
     && firstRound.publishIdempotencyKey === input.publishIdempotencyKey
+    && JSON.stringify(existing.poll.source) === JSON.stringify(input.source)
     && firstRound.createdAt === input.createdAt;
 }
 

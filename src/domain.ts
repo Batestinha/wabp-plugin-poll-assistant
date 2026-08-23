@@ -60,7 +60,14 @@ export const pollQuorumSchema = z.discriminatedUnion('kind', [
 
 export const pollElectorateDefinitionSchema = z.object({
   kind: z.literal('members_at_publication')
-}).strict();
+}).strict().or(z.object({
+  kind: z.literal('group_members_until_cutoff')
+}).strict()).or(z.object({
+  kind: z.literal('actor')
+}).strict());
+
+export const pollBallotDeliverySchema = z.enum(['group', 'private']);
+export const pollVoterDisclosureSchema = z.enum(['named', 'hidden']);
 
 export const decideRuleSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('plurality') }).strict(),
@@ -84,7 +91,8 @@ export const decideRuleSchema = z.discriminatedUnion('kind', [
 export const decideTiePolicySchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('no_decision') }).strict(),
   z.object({ kind: z.literal('authorized_choice') }).strict(),
-  z.object({ kind: z.literal('status_quo') }).strict()
+  z.object({ kind: z.literal('status_quo') }).strict(),
+  z.object({ kind: z.literal('random_draw') }).strict()
 ]);
 
 export const measureRuleSchema = z.discriminatedUnion('kind', [
@@ -109,7 +117,9 @@ const definitionBase = {
     .max(WHATSAPP_POLL_MAX_OPTIONS),
   closing: pollClosingConditionSchema,
   quorum: pollQuorumSchema,
-  electorate: pollElectorateDefinitionSchema
+  electorate: pollElectorateDefinitionSchema,
+  ballotDelivery: pollBallotDeliverySchema.default('group'),
+  voterDisclosure: pollVoterDisclosureSchema.default('named')
 } as const;
 
 const decidePollDefinitionSchema = z.object({
@@ -136,6 +146,20 @@ export const pollDefinitionSchema = z.discriminatedUnion('purpose', [
   measurePollDefinitionSchema,
   countPollDefinitionSchema
 ]).superRefine((definition, ctx) => {
+  if (definition.ballotDelivery === 'group' && definition.voterDisclosure === 'hidden') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Group ballot delivery cannot hide voter identities',
+      path: ['voterDisclosure']
+    });
+  }
+  if (definition.electorate.kind === 'actor' && definition.ballotDelivery !== 'private') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Actor-only electorates require private ballot delivery',
+      path: ['ballotDelivery']
+    });
+  }
   const optionIds = definition.options.map((option) => option.id);
   const labels = definition.options.map((option) => option.label);
   const ordinals = definition.options.map((option) => option.ordinal);
@@ -267,6 +291,10 @@ export const pollBallotSourceSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('transport_readback'),
     readbackId: stableIdSchema
+  }).strict(),
+  z.object({
+    kind: z.literal('service_resolution'),
+    resolutionId: stableIdSchema
   }).strict()
 ]);
 
@@ -379,6 +407,8 @@ export type DecidePollDefinition = z.infer<typeof decidePollDefinitionSchema>;
 export type MeasurePollDefinition = z.infer<typeof measurePollDefinitionSchema>;
 export type CountPollDefinition = z.infer<typeof countPollDefinitionSchema>;
 export type PollElector = z.infer<typeof pollElectorSchema>;
+export type PollBallotDelivery = z.infer<typeof pollBallotDeliverySchema>;
+export type PollVoterDisclosure = z.infer<typeof pollVoterDisclosureSchema>;
 export type PollBallot = z.infer<typeof pollBallotSchema>;
 export type PollReadbackBallot = z.infer<typeof pollReadbackBallotSchema>;
 export type PollOptionTally = z.infer<typeof pollOptionTallySchema>;

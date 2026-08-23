@@ -13,14 +13,22 @@ import {
   POLL_CLEANUP_JOB,
   POLL_DELIVER_JOB,
   POLL_FINALIZE_JOB,
+  POLL_PRIVATE_ISSUE_JOB,
   POLL_PUBLISH_JOB
 } from './jobs';
+import {
+  POLL_ASSISTANT_AUTOMATION_SERVICE_ID,
+  POLL_ASSISTANT_CANCEL_POLL_METHOD,
+  POLL_ASSISTANT_ENSURE_POLL_METHOD,
+  POLL_ASSISTANT_RESOLVE_OUTCOME_METHOD,
+  POLL_ASSISTANT_RESOLVE_POLL_METHOD
+} from './serviceApi';
 import { pollAssistantMessages } from './messages';
 
 export const pollAssistantManifest: PluginManifest = {
   pluginId: POLL_ASSISTANT_PLUGIN_ID,
   kind: 'managed_group',
-  version: '0.1.0',
+  version: '0.2.0',
   coreApiRange: '>=0.2.0',
   messageNamespace: 'official.poll-assistant',
   descriptionKey: 'official.poll-assistant.description',
@@ -98,7 +106,21 @@ export const pollAssistantManifest: PluginManifest = {
       }
     ]
   },
-  eventSubscriptions: ['poll.vote', 'plugin.job'],
+  eventSubscriptions: ['poll.vote', 'participant.change', 'plugin.job'],
+  services: [{
+    serviceId: POLL_ASSISTANT_AUTOMATION_SERVICE_ID,
+    description: 'Idempotent source-owned automated decision poll lifecycles.',
+    methods: [
+      { name: POLL_ASSISTANT_ENSURE_POLL_METHOD, access: 'mutation' },
+      {
+        name: POLL_ASSISTANT_RESOLVE_POLL_METHOD,
+        access: 'read',
+        availability: 'installed'
+      },
+      { name: POLL_ASSISTANT_RESOLVE_OUTCOME_METHOD, access: 'mutation' },
+      { name: POLL_ASSISTANT_CANCEL_POLL_METHOD, access: 'mutation' }
+    ]
+  }],
   requiredPermissions: [
     POLL_ASSISTANT_COMMAND_PERMISSIONS.create,
     POLL_ASSISTANT_COMMAND_PERMISSIONS.manage
@@ -109,6 +131,7 @@ export const pollAssistantManifest: PluginManifest = {
   backgroundJobs: [
     POLL_PUBLISH_JOB,
     POLL_FINALIZE_JOB,
+    POLL_PRIVATE_ISSUE_JOB,
     POLL_DELIVER_JOB,
     POLL_CLEANUP_JOB
   ],
@@ -136,11 +159,11 @@ export const pollAssistantManifest: PluginManifest = {
     ]
   },
   dependencies: [
-    { pluginId: 'official.doas', versionRange: '>=0.3.0' }
+    { pluginId: 'official.doas', versionRange: '>=0.4.0' }
   ],
   databases: [...pollAssistantDatabases],
   ownedData: [{ resource: POLL_HISTORY_OWNED_DATA_RESOURCE }],
-  dataVersion: '1',
+  dataVersion: '2',
   assistant: {
     summary: pollAssistantMessages['official.poll-assistant.assistant.summary']!,
     summaryKey: 'official.poll-assistant.assistant.summary',

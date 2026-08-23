@@ -7,6 +7,9 @@ export const POLL_PUBLISH_JOB = 'poll.publish';
 export const POLL_FINALIZE_JOB = 'poll.finalize';
 export const POLL_DELIVER_JOB = 'poll.deliver';
 export const POLL_CLEANUP_JOB = 'poll.cleanup';
+export const POLL_PRIVATE_ISSUE_JOB = 'poll.private-issue';
+export const POLL_PRIVATE_ISSUANCE_PACING_MS = 2_000;
+export const POLL_PRIVATE_MINIMUM_VOTING_WINDOW_MS = 60_000;
 
 export const pollRoundJobPayloadSchema = z.object({
   pollId: z.string().trim().min(1),
@@ -19,6 +22,10 @@ export const pollDeliveryJobPayloadSchema = z.object({
 
 export const pollCleanupJobPayloadSchema = z.object({
   pollId: z.string().trim().min(1)
+}).strict();
+
+export const pollPrivateIssueJobPayloadSchema = z.object({
+  issuanceId: z.string().trim().min(1)
 }).strict();
 
 export async function enqueuePollPublishJob(
@@ -98,12 +105,7 @@ export async function enqueuePollDeliveryJob(
     ...(input.groupWid ? { groupWid: input.groupWid } : {}),
     payload: { deliveryId: input.deliveryId },
     ...(input.runAt ? { runAt: input.runAt } : {}),
-    dedupeKey: scheduledJobGenerationKey(
-      POLL_DELIVER_JOB,
-      input.deliveryId,
-      input.attempt,
-      input.runAt
-    )
+    dedupeKey: `${POLL_DELIVER_JOB}:${input.deliveryId}:${input.attempt}`
   });
 }
 
@@ -126,6 +128,31 @@ export async function enqueuePollCleanupJob(
     payload: { pollId: input.pollId },
     runAt: input.runAt,
     dedupeKey: `${POLL_CLEANUP_JOB}:${input.pollId}:${input.runAt.toISOString()}`
+  });
+}
+
+export async function enqueuePollPrivateIssueJob(
+  context: Pick<PluginRuntimeContext, 'queue'>,
+  input: {
+    scopeId: string;
+    issuanceId: string;
+    groupId?: string | undefined;
+    groupWid: string;
+    attempt: number;
+    runAt?: Date | undefined;
+  }
+): Promise<void> {
+  await enqueuePluginJob(context.queue, {
+    pluginId: POLL_ASSISTANT_PLUGIN_ID,
+    jobName: POLL_PRIVATE_ISSUE_JOB,
+    scopeId: input.scopeId,
+    ...(input.groupId ? { groupId: input.groupId } : {}),
+    groupWid: input.groupWid,
+    payload: { issuanceId: input.issuanceId },
+    ...(input.runAt ? { runAt: input.runAt } : {}),
+    // Recovery may rediscover a not-yet-due issuance. Keep one durable job for
+    // each claim attempt regardless of which sweep calculated its runAt.
+    dedupeKey: `${POLL_PRIVATE_ISSUE_JOB}:${input.issuanceId}:${input.attempt}`
   });
 }
 

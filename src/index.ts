@@ -6,6 +6,7 @@ import {
 import { createPollAssistantHooks } from './hooks';
 import { registerPollAssistantTools } from './assistantTools';
 import { pollAssistantManifest } from './manifest';
+import { registerPollAssistantServices } from './service';
 
 export const pollAssistantPlugin: BotPlugin = {
   manifest: pollAssistantManifest,
@@ -20,6 +21,9 @@ export const pollAssistantPlugin: BotPlugin = {
   },
   registerAssistantTools(context) {
     return registerPollAssistantTools(context);
+  },
+  registerServices(context) {
+    return registerPollAssistantServices(context);
   }
 };
 

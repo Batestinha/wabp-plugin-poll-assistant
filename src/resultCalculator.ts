@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   decidePollResultSchema,
   countPollResultSchema,
@@ -24,6 +25,14 @@ export interface CalculatePollResultInput {
   ballots: readonly PollBallot[];
   cutoffAt: string;
   computedAt: string;
+}
+
+export interface PollRandomDrawAuditTrace {
+  algorithm: 'sha256_lexicographic_v1';
+  tiedOptionIds: string[];
+  selectedOptionIds: string[];
+  remainingSeats: number;
+  drawDigest: string;
 }
 
 export function calculatePollResult(input: CalculatePollResultInput): PollResult {
@@ -76,7 +85,7 @@ export function calculatePollResult(input: CalculatePollResultInput): PollResult
       ...common,
       purpose: 'decide',
       outcome: quorumMet
-        ? calculateDecisionOutcome(definition, tallies)
+        ? calculateDecisionOutcome(definition, tallies, input.roundId, input.cutoffAt, responseCount)
         : { status: 'quorum_not_met' }
     };
     return decidePollResultSchema.parse(result);
@@ -107,6 +116,77 @@ export function calculatePollResult(input: CalculatePollResultInput): PollResult
       : { status: 'quorum_not_met' }
   };
   return countPollResultSchema.parse(result);
+}
+
+export function describePollRandomDraw(
+  definitionInput: PollDefinition,
+  result: PollResult
+): PollRandomDrawAuditTrace | undefined {
+  const definition = pollDefinitionSchema.parse(definitionInput);
+  if (
+    definition.purpose !== 'decide'
+    || definition.tiePolicy.kind !== 'random_draw'
+    || result.purpose !== 'decide'
+    || result.outcome.status !== 'selected'
+    || result.responseCount === 0
+  ) {
+    return undefined;
+  }
+  let tiedOptionIds: string[];
+  let remainingSeats: number;
+  if (definition.rule.kind === 'approve_reject') {
+    const rule = definition.rule;
+    const approveCount = result.tallies.find(
+      (tally) => tally.optionId === rule.approveOptionId
+    )?.count ?? 0;
+    const rejectCount = result.tallies.find(
+      (tally) => tally.optionId === rule.rejectOptionId
+    )?.count ?? 0;
+    if (approveCount !== rejectCount) {
+      return undefined;
+    }
+    tiedOptionIds = [rule.approveOptionId, rule.rejectOptionId];
+    remainingSeats = 1;
+  } else {
+    const seats = definition.rule.kind === 'single_non_transferable'
+      || definition.rule.kind === 'multiwinner_approval'
+      ? definition.rule.seats
+      : 1;
+    const ordinalByOptionId = new Map(definition.options.map((option) => [option.id, option.ordinal]));
+    const rankedTallies = [...result.tallies].sort((left, right) =>
+      right.count - left.count
+      || (ordinalByOptionId.get(left.optionId) ?? 0) - (ordinalByOptionId.get(right.optionId) ?? 0)
+    );
+    const boundaryScore = rankedTallies[seats - 1]?.count;
+    if (boundaryScore === undefined) {
+      return undefined;
+    }
+    const certainCount = rankedTallies.filter((tally) => tally.count > boundaryScore).length;
+    tiedOptionIds = rankedTallies
+      .filter((tally) => tally.count === boundaryScore)
+      .map((tally) => tally.optionId);
+    remainingSeats = seats - certainCount;
+    if (tiedOptionIds.length <= remainingSeats) {
+      return undefined;
+    }
+  }
+  const selectedOptionIds = result.outcome.selectedOptionIds.filter((optionId) =>
+    tiedOptionIds.includes(optionId));
+  const ranking = deterministicRandomRanking(
+    definition,
+    result.roundId,
+    result.cutoffAt,
+    tiedOptionIds
+  );
+  return {
+    algorithm: 'sha256_lexicographic_v1',
+    tiedOptionIds,
+    selectedOptionIds,
+    remainingSeats,
+    drawDigest: createHash('sha256')
+      .update(ranking.map(({ optionId, rank }) => `${optionId}:${rank}`).join('\n'))
+      .digest('hex')
+  };
 }
 
 function assertCanonicalInputs(
@@ -158,14 +238,19 @@ function assertCanonicalInputs(
 }
 
 function ballotSourceId(ballot: PollBallot): string {
-  return ballot.source.kind === 'transport_event'
-    ? ballot.source.waMessageId
-    : ballot.source.readbackId;
+  switch (ballot.source.kind) {
+    case 'transport_event': return ballot.source.waMessageId;
+    case 'transport_readback': return ballot.source.readbackId;
+    case 'service_resolution': return ballot.source.resolutionId;
+  }
 }
 
 function calculateDecisionOutcome(
   definition: DecidePollDefinition,
-  tallies: readonly PollOptionTally[]
+  tallies: readonly PollOptionTally[],
+  roundId: string,
+  cutoffAt: string,
+  responseCount: number
 ): DecidePollResult['outcome'] {
   if (definition.rule.kind === 'approve_reject') {
     const rule = definition.rule;
@@ -184,6 +269,21 @@ function calculateDecisionOutcome(
         return { status: 'tie', ...tiedOutcome };
       }
       if (definition.tiePolicy.kind === 'no_decision') {
+        return { status: 'no_decision', reason: 'tie', ...tiedOutcome };
+      }
+      if (definition.tiePolicy.kind === 'random_draw' && responseCount > 0) {
+        return {
+          status: 'selected',
+          selectedOptionIds: deterministicRandomSelection(
+            definition,
+            roundId,
+            cutoffAt,
+            tiedOutcome.tiedOptionIds,
+            1
+          )
+        };
+      }
+      if (definition.tiePolicy.kind === 'random_draw') {
         return { status: 'no_decision', reason: 'tie', ...tiedOutcome };
       }
       return { status: 'selected', selectedOptionIds: [rule.rejectOptionId] };
@@ -220,14 +320,64 @@ function calculateDecisionOutcome(
       tiedOptionIds: boundary.map((tally) => tally.optionId),
       remainingSeats
     };
-    return definition.tiePolicy.kind === 'authorized_choice'
-      ? { status: 'tie', ...tiedOutcome }
-      : { status: 'no_decision', reason: 'tie', ...tiedOutcome };
+    if (definition.tiePolicy.kind === 'authorized_choice') {
+      return { status: 'tie', ...tiedOutcome };
+    }
+    if (definition.tiePolicy.kind === 'random_draw' && responseCount > 0) {
+      return {
+        status: 'selected',
+        selectedOptionIds: [
+          ...tiedOutcome.certainOptionIds,
+          ...deterministicRandomSelection(
+            definition,
+            roundId,
+            cutoffAt,
+            tiedOutcome.tiedOptionIds,
+            remainingSeats
+          )
+        ]
+      };
+    }
+    return { status: 'no_decision', reason: 'tie', ...tiedOutcome };
   }
   return {
     status: 'selected',
     selectedOptionIds: ranked.slice(0, seats).map((tally) => tally.optionId)
   };
+}
+
+function deterministicRandomSelection(
+  definition: DecidePollDefinition,
+  roundId: string,
+  cutoffAt: string,
+  optionIds: readonly string[],
+  count: number
+): string[] {
+  return deterministicRandomRanking(definition, roundId, cutoffAt, optionIds)
+    .slice(0, count)
+    .map(({ optionId }) => optionId);
+}
+
+function deterministicRandomRanking(
+  definition: DecidePollDefinition,
+  roundId: string,
+  cutoffAt: string,
+  optionIds: readonly string[]
+): Array<{ optionId: string; rank: string }> {
+  return [...optionIds]
+    .map((optionId) => ({
+      optionId,
+      rank: createHash('sha256')
+        .update(definition.id)
+        .update('\u0000')
+        .update(roundId)
+        .update('\u0000')
+        .update(cutoffAt)
+        .update('\u0000')
+        .update(optionId)
+        .digest('hex')
+    }))
+    .sort((left, right) => left.rank.localeCompare(right.rank) || left.optionId.localeCompare(right.optionId));
 }
 
 function calculateMeasureAnalysis(

@@ -3,10 +3,19 @@ import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runti
 import { equivalentWhatsAppMessageIds } from '../../../platform/transport/messageIds';
 import { mapAuthoritativePollReadback } from './authoritativeReadback';
 import type { PollBallotMappingTarget } from './ballotMapping';
+import type { PollReadbackBallot } from './domain';
 import { parsePollAssistantConfig } from './config';
+import {
+  DOAS_PRIVATE_POLL_RECONCILE_METHOD,
+  DOAS_PRIVATE_POLL_SERVICE_ID,
+  doasPrivatePollReconcileInputSchema,
+  type DoasPrivatePollReconcileOutput
+} from '../doas/serviceApi';
 import { enqueuePollDeliveryJob, enqueuePollFinalizeJob, pollRetryAt } from './jobs';
 import { calculatePollResult } from './resultCalculator';
-import { renderPollResult } from './resultRendering';
+import { renderPollResultMessages } from './resultRendering';
+import { deliverPollRandomDrawAudit } from './randomDrawAudit';
+import { deliverPollPrivatePublicationAudit } from './privatePublicationAudit';
 import {
   POLL_FINALIZATION_LEASE_MS,
   claimPollRoundFinalization,
@@ -15,8 +24,12 @@ import {
   getPollAggregate,
   getPollDelivery,
   getPollLifecycleByRoundId,
+  getPollPrivateIssuance,
+  listPollPrivateIssuancesByRound,
   pollsDatabase,
+  reconcilePollPrivateIssuanceAtCutoff,
   replacePollBallotsFromAuthoritativeReadback,
+  renewPollRoundFinalizationClaim,
   reschedulePollRoundFinalization,
   type PollFinalizationClaim,
   type StoredPollRoundSnapshot
@@ -52,28 +65,41 @@ export async function finalizePollRound(
     if (!context.pollVoteReadbackFor || !context.resolveIdentityAddress) {
       throw new Error('Authoritative historical poll vote readback is unavailable.');
     }
-    const readback = await context.pollVoteReadbackFor(snapshot.round.pollWaMessageId!, {
-      asOf: cutoffAt
-    });
-    if (!equivalentWhatsAppMessageIds(readback.pollWaMsgId, snapshot.round.pollWaMessageId)) {
-      throw new Error('Authoritative poll readback returned a different poll id.');
+    renewFinalizationClaim(db, claim, clock());
+    if (snapshot.poll.definition.ballotDelivery === 'private') {
+      await reconcilePrivatePollIssuancesAtCutoff(
+        context,
+        snapshot,
+        claim,
+        () => renewFinalizationClaim(db, claim, clock()),
+        clock
+      );
     }
-    requireReadbackThroughCutoff(readback.completeThrough, cutoffAt);
     const aggregate = getPollAggregate(db, claim.poll.id);
     if (!aggregate || !snapshot.round.electorateCapturedAt) {
       throw new Error('Poll finalization requires a captured electorate.');
     }
-    const readbackBallots = await mapAuthoritativePollReadback({
-      readback,
-      target: mappingTarget(snapshot),
-      cutoffAt,
-      electorateWidByIdentityId: new Map(aggregate.electorate.map((elector) => [
-        elector.voterIdentityId,
-        elector.voterWid
-      ])),
-      resolveIdentityAddress: context.resolveIdentityAddress
-    });
+    const electorateWidByIdentityId = new Map(aggregate.electorate.map((elector) => [
+      elector.voterIdentityId,
+      elector.voterWid
+    ]));
+    const readbackBallots = snapshot.poll.definition.ballotDelivery === 'private'
+      ? await readPrivatePollBallots(
+          context,
+          snapshot,
+          cutoffAt,
+          electorateWidByIdentityId,
+          () => renewFinalizationClaim(db, claim, clock())
+        )
+      : await readGroupPollBallots(
+          context,
+          snapshot,
+          cutoffAt,
+          electorateWidByIdentityId,
+          () => renewFinalizationClaim(db, claim, clock())
+        );
     const readAt = clock();
+    renewFinalizationClaim(db, claim, readAt);
     const readbackId = authoritativeReadbackId(roundId, cutoffAt);
     const ballots = replacePollBallotsFromAuthoritativeReadback(db, {
       roundId,
@@ -105,40 +131,169 @@ export async function finalizePollRound(
     const config = parsePollAssistantConfig(configInput);
     const cutoffAtLabel = formatTimestamp(cutoffAt, config.timezone, localeResolution.locale);
     const deliveryId = `poll-result:${roundId}`;
+    const resultMessages = renderPollResultMessages({
+      definition: claim.poll.definition,
+      result,
+      ballots,
+      electorate: aggregate.electorate,
+      cutoffAtLabel,
+      locale: localeResolution.locale,
+      t
+    });
+    const completedAt = clock();
+    const deliveries = resultMessages.map((text, index) => ({
+      id: index === 0 ? deliveryId : `${deliveryId}:page:${index + 1}`,
+      kind: index === 0 && result.purpose === 'decide' && result.outcome.status === 'tie'
+        ? 'tie' as const
+        : 'result' as const,
+      deliveryKey: index === 0 ? `result:${roundId}:v1` : `result:${roundId}:page:${index + 1}:v1`,
+      chatId: claim.poll.chatId,
+      text,
+      idempotencyKey: index === 0
+        ? `poll-assistant:result:${claim.poll.id}:${roundId}:v1`
+        : `poll-assistant:result:${claim.poll.id}:${roundId}:page:${index + 1}:v1`,
+      deliveryBatchKey: `poll-result:${roundId}`,
+      deliverySequence: index,
+      ...(index > 0
+        ? { notBefore: new Date(completedAt.getTime() + index * 2_000).toISOString() }
+        : {})
+    }));
+    renewFinalizationClaim(db, claim, completedAt);
     const completed = completePollRoundFinalization(db, {
       roundId,
       claimToken: claim.claimToken,
       result,
       inputSha256,
       readbackSource: 'transport_readback',
-      delivery: {
-        id: deliveryId,
-        kind: result.purpose === 'decide' && result.outcome.status === 'tie' ? 'tie' : 'result',
-        deliveryKey: `result:${roundId}:v1`,
-        chatId: claim.poll.chatId,
-        text: renderPollResult({
-          definition: claim.poll.definition,
-          result,
-          cutoffAtLabel,
-          locale: localeResolution.locale,
-          t
-        }),
-        idempotencyKey: `poll-assistant:result:${claim.poll.id}:${roundId}:v1`
-      },
-      completedAt: readAt.toISOString()
+      delivery: deliveries[0]!,
+      additionalDeliveries: deliveries.slice(1),
+      completedAt: completedAt.toISOString()
     });
     if (completed === 'completed' || completed === 'already_completed') {
-      await enqueuePollDeliveryJob(context, {
-        scopeId: claim.poll.scopeId,
-        deliveryId,
-        ...(claim.poll.groupId ? { groupId: claim.poll.groupId } : {}),
-        groupWid: claim.poll.chatId,
-        attempt: 1
-      });
+      try {
+        await deliverPollRandomDrawAudit(context, roundId, clock);
+      } catch (error) {
+        context.logger.warn({ error, pollId: claim.poll.id, roundId }, 'Random-draw audit delivery deferred');
+      }
+      for (const [index, delivery] of deliveries.entries()) {
+        if (index > 0) {
+          continue;
+        }
+        const stored = getPollDelivery(db, delivery.id);
+        if (!stored || stored.status === 'sent') {
+          continue;
+        }
+        await enqueuePollDeliveryJob(context, {
+          scopeId: claim.poll.scopeId,
+          deliveryId: delivery.id,
+          ...(claim.poll.groupId ? { groupId: claim.poll.groupId } : {}),
+          groupWid: claim.poll.chatId,
+          attempt: stored.attempt + 1
+        });
+      }
     }
   } catch (error) {
     await rescheduleFinalization(context, claim, error, clock());
   }
+}
+
+async function reconcilePrivatePollIssuancesAtCutoff(
+  context: PluginRuntimeContext,
+  snapshot: StoredPollRoundSnapshot,
+  claim: PollFinalizationClaim,
+  renewClaim: () => void,
+  clock: () => Date
+): Promise<void> {
+  const db = pollsDatabase(context.databases);
+  for (const issuance of listPollPrivateIssuancesByRound(db, snapshot.round.id)) {
+    if (issuance.status === 'sent') {
+      if (!issuance.pollWaMessageId) {
+        throw new Error(`Private poll issuance ${issuance.id} is sent without a message id.`);
+      }
+      continue;
+    }
+    if (issuance.status === 'failed') {
+      continue;
+    }
+    const observedAt = clock();
+    if (
+      issuance.status === 'publishing'
+      && issuance.leaseExpiresAt
+      && Date.parse(issuance.leaseExpiresAt) > observedAt.getTime()
+    ) {
+      throw new Error(`Private poll issuance ${issuance.id} is still being published at cutoff.`);
+    }
+
+    if (!issuance.publicationStartedAt) {
+      renewClaim();
+      const settled = reconcilePollPrivateIssuanceAtCutoff(db, {
+        roundId: snapshot.round.id,
+        finalizationClaimToken: claim.claimToken,
+        issuanceId: issuance.id,
+        resolution: 'absent',
+        reconciledAt: observedAt.toISOString()
+      });
+      if (!settled && !isTerminalPrivateIssuance(db, issuance.id)) {
+        throw new Error(`Private poll issuance ${issuance.id} changed during cutoff settlement.`);
+      }
+      continue;
+    }
+
+    if (!context.services) {
+      throw new Error('Private poll receipt reconciliation service is unavailable.');
+    }
+    renewClaim();
+    const receipt = await context.services.call<DoasPrivatePollReconcileOutput>({
+      serviceId: DOAS_PRIVATE_POLL_SERVICE_ID,
+      method: DOAS_PRIVATE_POLL_RECONCILE_METHOD,
+      scopeId: snapshot.poll.scopeId,
+      actorIdentityId: snapshot.poll.creatorIdentityId,
+      ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
+      groupWid: snapshot.poll.chatId,
+      input: doasPrivatePollReconcileInputSchema.parse({
+        groupWid: snapshot.poll.chatId,
+        recipientIdentityId: issuance.voterIdentityId,
+        recipientDeliveryChatId: issuance.voterWid,
+        idempotencyKey: issuance.publishIdempotencyKey
+      })
+    });
+    if (receipt.status === 'unknown') {
+      throw new Error(`Private poll issuance ${issuance.id} still has an unknown provider outcome.`);
+    }
+    const reconciledAt = clock();
+    renewClaim();
+    const settled = reconcilePollPrivateIssuanceAtCutoff(db, {
+      roundId: snapshot.round.id,
+      finalizationClaimToken: claim.claimToken,
+      issuanceId: issuance.id,
+      resolution: receipt.status,
+      ...(receipt.messageId ? { pollWaMessageId: receipt.messageId } : {}),
+      ...(receipt.remoteChatId ? { remoteChatId: receipt.remoteChatId } : {}),
+      ...(receipt.acceptedAt ? { acceptedAt: receipt.acceptedAt } : {}),
+      reconciledAt: reconciledAt.toISOString()
+    });
+    if (!settled && !isTerminalPrivateIssuance(db, issuance.id)) {
+      throw new Error(`Private poll issuance ${issuance.id} changed during receipt reconciliation.`);
+    }
+    if (receipt.status === 'found') {
+      try {
+        await deliverPollPrivatePublicationAudit(context, issuance.id, clock);
+      } catch (error) {
+        context.logger.warn(
+          { error, issuanceId: issuance.id },
+          'official.poll-assistant private publication audit delivery deferred'
+        );
+      }
+    }
+  }
+}
+
+function isTerminalPrivateIssuance(
+  db: ReturnType<typeof pollsDatabase>,
+  issuanceId: string
+): boolean {
+  const issuance = getPollPrivateIssuance(db, issuanceId);
+  return issuance?.status === 'sent' || issuance?.status === 'failed';
 }
 
 function formatTimestamp(value: Date, timezone: string, locale: string): string {
@@ -168,7 +323,10 @@ function requireFinalizationSnapshot(
     || snapshot.poll.id !== claim.poll.id
     || snapshot.round.status !== 'finalizing'
     || snapshot.round.finalizationClaimToken !== claim.claimToken
-    || !snapshot.round.pollWaMessageId
+    || (
+      snapshot.poll.definition.ballotDelivery === 'group'
+      && !snapshot.round.pollWaMessageId
+    )
   ) {
     throw new Error(`Poll round ${claim.round.id} has no claimed finalization snapshot.`);
   }
@@ -183,10 +341,13 @@ function requireCutoff(snapshot: StoredPollRoundSnapshot): Date {
   return cutoffAt;
 }
 
-function mappingTarget(snapshot: StoredPollRoundSnapshot): PollBallotMappingTarget {
+function mappingTarget(
+  snapshot: StoredPollRoundSnapshot,
+  pollWaMessageId: string
+): PollBallotMappingTarget {
   return {
     roundId: snapshot.round.id,
-    pollWaMessageId: snapshot.round.pollWaMessageId!,
+    pollWaMessageId,
     allowMultipleAnswers: snapshot.round.allowMultipleAnswers,
     options: snapshot.options.map((option) => ({
       optionId: option.optionId,
@@ -194,6 +355,83 @@ function mappingTarget(snapshot: StoredPollRoundSnapshot): PollBallotMappingTarg
       wireLabel: option.wireLabel
     }))
   };
+}
+
+async function readGroupPollBallots(
+  context: PluginRuntimeContext,
+  snapshot: StoredPollRoundSnapshot,
+  cutoffAt: Date,
+  electorateWidByIdentityId: ReadonlyMap<string, string>,
+  renewClaim: () => void
+) {
+  const pollWaMessageId = snapshot.round.pollWaMessageId!;
+  renewClaim();
+  const readback = await context.pollVoteReadbackFor!(pollWaMessageId, { asOf: cutoffAt });
+  if (!equivalentWhatsAppMessageIds(readback.pollWaMsgId, pollWaMessageId)) {
+    throw new Error('Authoritative poll readback returned a different poll id.');
+  }
+  requireReadbackThroughCutoff(readback.completeThrough, cutoffAt);
+  return mapAuthoritativePollReadback({
+    readback,
+    target: mappingTarget(snapshot, pollWaMessageId),
+    cutoffAt,
+    electorateWidByIdentityId,
+    resolveIdentityAddress: context.resolveIdentityAddress!
+  });
+}
+
+async function readPrivatePollBallots(
+  context: PluginRuntimeContext,
+  snapshot: StoredPollRoundSnapshot,
+  cutoffAt: Date,
+  electorateWidByIdentityId: ReadonlyMap<string, string>,
+  renewClaim: () => void
+) {
+  const issuances = listPollPrivateIssuancesByRound(
+    pollsDatabase(context.databases),
+    snapshot.round.id
+  ).filter((issuance) =>
+    issuance.status === 'sent'
+    && issuance.pollWaMessageId
+    && electorateWidByIdentityId.has(issuance.voterIdentityId));
+  const ballots: PollReadbackBallot[] = [];
+  for (const issuance of issuances) {
+    const pollWaMessageId = issuance.pollWaMessageId!;
+    renewClaim();
+    const readback = await context.pollVoteReadbackFor!(pollWaMessageId, { asOf: cutoffAt });
+    if (!equivalentWhatsAppMessageIds(readback.pollWaMsgId, pollWaMessageId)) {
+      throw new Error('Authoritative private poll readback returned a different poll id.');
+    }
+    requireReadbackThroughCutoff(readback.completeThrough, cutoffAt);
+    const mapped = await mapAuthoritativePollReadback({
+      readback,
+      target: mappingTarget(snapshot, pollWaMessageId),
+      cutoffAt,
+      electorateWidByIdentityId,
+      resolveIdentityAddress: context.resolveIdentityAddress!
+    });
+    if (mapped.some((ballot) => ballot.voterIdentityId !== issuance.voterIdentityId)) {
+      throw new Error('Authoritative private poll readback returned a ballot for another elector.');
+    }
+    ballots.push(...mapped);
+  }
+  return ballots;
+}
+
+function renewFinalizationClaim(
+  db: ReturnType<typeof pollsDatabase>,
+  claim: PollFinalizationClaim,
+  renewedAt: Date
+): void {
+  const renewed = renewPollRoundFinalizationClaim(db, {
+    roundId: claim.round.id,
+    claimToken: claim.claimToken,
+    now: renewedAt.toISOString(),
+    leaseExpiresAt: new Date(renewedAt.getTime() + POLL_FINALIZATION_LEASE_MS).toISOString()
+  });
+  if (!renewed) {
+    throw new Error(`Finalization claim for poll round ${claim.round.id} expired during readback.`);
+  }
 }
 
 function authoritativeReadbackId(roundId: string, cutoffAt: Date): string {

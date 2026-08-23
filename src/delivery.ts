@@ -5,13 +5,21 @@ import {
   isTransportProviderUnavailableError
 } from '../../../platform/transport/transportErrors';
 import { parsePollAssistantConfig } from './config';
+import {
+  DOAS_PRIVATE_POLL_RELEASE_METHOD,
+  DOAS_PRIVATE_POLL_SERVICE_ID,
+  doasPrivatePollReleaseInputSchema,
+  type DoasPrivatePollReleaseOutput
+} from '../doas/serviceApi';
 import { enqueuePollCleanupJob, enqueuePollDeliveryJob, pollRetryAt } from './jobs';
 import {
   POLL_DELIVERY_LEASE_MS,
   claimPollDeliveryById,
   getPollAggregate,
   getPollDelivery,
+  getNextPendingPollDeliveryInBatch,
   getPollRetentionAnchor,
+  listPollPrivateIssuancesByRound,
   markPollCleanupReview,
   markPollDeliverySent,
   markPollDeliveryUncertain,
@@ -44,6 +52,7 @@ export async function deliverPollMessage(
   if (!claim) {
     const existing = getPollDelivery(db, deliveryId);
     if (existing?.status === 'sent' && existing.sentAt) {
+      await scheduleNextPollResultPage(context, existing, new Date(existing.sentAt));
       await schedulePollCleanup(context, existing.pollId);
     }
     return;
@@ -69,6 +78,7 @@ export async function deliverPollMessage(
       sentAt: sentAt.toISOString()
     });
     if (persisted) {
+      await scheduleNextPollResultPage(context, claim.delivery, sentAt);
       await schedulePollCleanup(context, claim.delivery.pollId);
     }
   } catch (error) {
@@ -121,19 +131,77 @@ export async function cleanupPollBallots(
     });
     return;
   }
-  if (!context.releasePollSendReceipt) {
-    throw new Error('Authoritative Poll vote-history release is unavailable.');
-  }
-  for (const round of aggregate.rounds) {
-    await context.releasePollSendReceipt(
-      aggregate.poll.chatId,
-      round.publishIdempotencyKey
-    );
+  if (aggregate.poll.definition.ballotDelivery === 'private') {
+    if (!context.services) {
+      throw new Error('Private poll vote-history release service is unavailable.');
+    }
+    for (const round of aggregate.rounds) {
+      for (const issuance of listPollPrivateIssuancesByRound(db, round.id)) {
+        if (!issuance.publicationStartedAt) {
+          continue;
+        }
+        const released = await context.services.call<DoasPrivatePollReleaseOutput>({
+          serviceId: DOAS_PRIVATE_POLL_SERVICE_ID,
+          method: DOAS_PRIVATE_POLL_RELEASE_METHOD,
+          scopeId: aggregate.poll.scopeId,
+          actorIdentityId: aggregate.poll.creatorIdentityId,
+          ...(aggregate.poll.groupId ? { groupId: aggregate.poll.groupId } : {}),
+          groupWid: aggregate.poll.chatId,
+          input: doasPrivatePollReleaseInputSchema.parse({
+            groupWid: aggregate.poll.chatId,
+            recipientIdentityId: issuance.voterIdentityId,
+            recipientDeliveryChatId: issuance.voterWid,
+            idempotencyKey: issuance.publishIdempotencyKey
+          })
+        });
+        if (!released.released) {
+          throw new Error(`Private poll history receipt ${issuance.id} was not released.`);
+        }
+      }
+    }
+  } else {
+    if (!context.releasePollSendReceipt) {
+      throw new Error('Authoritative Poll vote-history release is unavailable.');
+    }
+    for (const round of aggregate.rounds) {
+      await context.releasePollSendReceipt(
+        aggregate.poll.chatId,
+        round.publishIdempotencyKey
+      );
+    }
   }
   purgePollBallotData(db, {
     pollId,
     terminalBefore: new Date(now.getTime() - retentionMs).toISOString(),
     purgedAt: now.toISOString()
+  });
+}
+
+async function scheduleNextPollResultPage(
+  context: PluginRuntimeContext,
+  delivered: { deliveryBatchKey?: string | undefined; pollId: string },
+  now: Date
+): Promise<void> {
+  if (!delivered.deliveryBatchKey) {
+    return;
+  }
+  const db = pollsDatabase(context.databases);
+  const next = getNextPendingPollDeliveryInBatch(db, delivered.deliveryBatchKey);
+  if (!next) {
+    return;
+  }
+  const aggregate = getPollAggregate(db, delivered.pollId);
+  if (!aggregate) {
+    return;
+  }
+  const scheduledAt = next.nextAttemptAt ? new Date(next.nextAttemptAt) : now;
+  await enqueuePollDeliveryJob(context, {
+    scopeId: aggregate.poll.scopeId,
+    deliveryId: next.id,
+    ...(aggregate.poll.groupId ? { groupId: aggregate.poll.groupId } : {}),
+    groupWid: aggregate.poll.chatId,
+    attempt: next.attempt + 1,
+    ...(scheduledAt.getTime() > now.getTime() ? { runAt: scheduledAt } : {})
   });
 }
 

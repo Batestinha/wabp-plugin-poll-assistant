@@ -50,7 +50,18 @@ const pollQuorumPolicySchema = z.object({
 
 const pollTiePolicyPolicySchema = z.object({
   mode: pollCreationFieldModeSchema.default('ask'),
-  kind: z.enum(['no_decision', 'authorized_choice', 'status_quo']).default('no_decision')
+  kind: z.enum(['no_decision', 'authorized_choice', 'status_quo', 'random_draw'])
+    .default('no_decision')
+}).strict().default({});
+
+const pollBallotDeliveryPolicySchema = z.object({
+  mode: pollCreationFieldModeSchema.default('ask'),
+  value: z.enum(['group', 'private']).default('group')
+}).strict().default({});
+
+const pollVoterDisclosurePolicySchema = z.object({
+  mode: pollCreationFieldModeSchema.default('ask'),
+  value: z.enum(['named', 'hidden']).default('named')
 }).strict().default({});
 
 export const pollCreationPresetSchema = z.object({
@@ -67,7 +78,9 @@ export const pollCreationPresetSchema = z.object({
   countUnit: pollCountUnitPolicySchema,
   closing: pollClosingPolicySchema,
   quorum: pollQuorumPolicySchema,
-  tiePolicy: pollTiePolicyPolicySchema
+  tiePolicy: pollTiePolicyPolicySchema,
+  ballotDelivery: pollBallotDeliveryPolicySchema,
+  voterDisclosure: pollVoterDisclosurePolicySchema
 }).strict().superRefine((preset, ctx) => {
   if (
     preset.tiePolicy.mode === 'fixed'
@@ -78,6 +91,18 @@ export const pollCreationPresetSchema = z.object({
       code: z.ZodIssueCode.custom,
       message: 'A fixed status-quo tie policy requires a fixed approve/reject rule',
       path: ['tiePolicy', 'kind']
+    });
+  }
+  if (
+    preset.ballotDelivery.mode === 'fixed'
+    && preset.ballotDelivery.value === 'group'
+    && preset.voterDisclosure.mode === 'fixed'
+    && preset.voterDisclosure.value === 'hidden'
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'A fixed group ballot cannot use hidden voter disclosure',
+      path: ['voterDisclosure', 'value']
     });
   }
 });
@@ -105,6 +130,7 @@ const pollAssistantConfigObjectSchema = z.object({
   defaultAbsoluteQuorumResponses: z.number().int().min(1).max(100_000).default(1),
   defaultPercentageQuorumBasisPoints: z.number().int().min(1).max(10_000).default(5_000),
   maxActivePollsPerChat: z.number().int().min(1).max(100).default(20),
+  maxPrivateElectorateSize: z.number().int().min(1).max(250).default(250),
   ballotRetentionDays: z.number().int().min(1).max(3_650).default(90),
   assistantExposeProvisionalResults: z.boolean().default(false),
   creationPresets: z.array(pollCreationPresetSchema).max(20).default([])

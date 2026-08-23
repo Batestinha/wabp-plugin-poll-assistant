@@ -17,18 +17,29 @@ import {
   type DoasPollReconcileOutput
 } from '../doas/serviceApi';
 import type { PollElector } from './domain';
+import { parsePollAssistantConfig } from './config';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';
-import { enqueuePollDeliveryJob, enqueuePollFinalizeJob, enqueuePollPublishJob, pollRetryAt } from './jobs';
+import {
+  enqueuePollDeliveryJob,
+  enqueuePollFinalizeJob,
+  enqueuePollPrivateIssueJob,
+  enqueuePollPublishJob,
+  POLL_PRIVATE_ISSUANCE_PACING_MS,
+  POLL_PRIVATE_MINIMUM_VOTING_WINDOW_MS,
+  pollRetryAt
+} from './jobs';
 import {
   POLL_PUBLICATION_LEASE_MS,
   capturePollElectorate,
   claimPollRoundPublication,
   discardUnanchoredPollElectorate,
+  ensurePollPrivateIssuancesForCapturedElectorate,
   failPollRoundPublication,
   getCapturedPollElectorateByRoundId,
   getPollDelivery,
   getPollLifecycleByRoundId,
   markPollRoundPublished,
+  markPrivatePollRoundPublished,
   pollsDatabase,
   resetPollRoundPublicationAfterDefiniteNonDelivery,
   renewPollRoundPublicationClaim,
@@ -90,9 +101,32 @@ export async function publishPollRound(
         updatedAt: clock().toISOString()
       });
     }
-    const electorate = await ensurePublicationElectorate(context, claim);
+    const config = parsePollAssistantConfig(await context.configFor(claim.poll.scopeId));
+    const electorate = await ensurePublicationElectorate(
+      context,
+      claim,
+      clock(),
+      config.maxPrivateElectorateSize
+    );
     let sendSnapshot = requireClaimedSnapshot(db, claim);
     requireTallyTotalWithinSafeInteger(sendSnapshot, electorate.length);
+    if (sendSnapshot.poll.definition.ballotDelivery === 'private') {
+      const activationBoundaryAt = clock();
+      requirePrivateFanoutWindow(sendSnapshot, electorate.length, activationBoundaryAt);
+      if (!renewPollRoundPublicationClaim(db, {
+        roundId: claim.round.id,
+        claimToken: claim.claimToken,
+        now: activationBoundaryAt.toISOString(),
+        leaseExpiresAt: new Date(
+          activationBoundaryAt.getTime() + POLL_PUBLICATION_LEASE_MS
+        ).toISOString()
+      })) {
+        throw new Error(`Publication claim for private poll round ${claim.round.id} expired before activation.`);
+      }
+      sendSnapshot = requireClaimedSnapshot(db, claim);
+      await activatePrivatePollRound(context, claim, sendSnapshot, clock);
+      return;
+    }
     let publicationStartedAt = sendSnapshot.round.publicationStartedAt;
     if (!context.services) {
       throw new Error('Poll publication service registry is unavailable.');
@@ -323,7 +357,9 @@ function requireTallyTotalWithinSafeInteger(
 
 async function ensurePublicationElectorate(
   context: PluginRuntimeContext,
-  claim: PollPublicationClaim
+  claim: PollPublicationClaim,
+  capturedAt: Date,
+  maxPrivateElectorateSize: number
 ): Promise<readonly PollElector[]> {
   const db = pollsDatabase(context.databases);
   const captured = getCapturedPollElectorateByRoundId(db, claim.round.id);
@@ -331,9 +367,38 @@ async function ensurePublicationElectorate(
     if (captured.length === 0) {
       throw new Error('Poll electorate is empty.');
     }
+    if (
+      claim.poll.definition.ballotDelivery === 'private'
+      && captured.length > maxPrivateElectorateSize
+    ) {
+      throw new CanonicalPollPublicationError(
+        `Private poll electorate ${captured.length} exceeds configured maximum ${maxPrivateElectorateSize}.`
+      );
+    }
     return captured;
   }
-  if (!context.getAuthoritativeGroupParticipantSnapshot || !context.resolveIdentityAddress) {
+  if (!context.resolveIdentityAddress) {
+    throw new Error('Authoritative identity reads are unavailable.');
+  }
+  if (claim.poll.definition.electorate.kind === 'actor') {
+    const organizer = await context.resolveIdentityAddress(claim.poll.creatorWid);
+    const voterIdentityId = organizer.identityId.trim();
+    const voterWid = organizer.deliveryChatId.trim();
+    if (!voterIdentityId || !voterWid || voterIdentityId !== claim.poll.creatorIdentityId) {
+      throw new Error('The actor-only electorate could not resolve its authoritative organizer.');
+    }
+    return capturePollElectorate(db, {
+      roundId: claim.round.id,
+      claimToken: claim.claimToken,
+      electorate: [{
+        voterIdentityId,
+        voterWid,
+        ...(claim.poll.creatorLabel.trim() ? { displayLabel: claim.poll.creatorLabel.trim() } : {})
+      }],
+      capturedAt: capturedAt.toISOString()
+    });
+  }
+  if (!context.getAuthoritativeGroupParticipantSnapshot) {
     throw new Error('Authoritative group participant and identity reads are unavailable.');
   }
   const participantSnapshot = await context.getAuthoritativeGroupParticipantSnapshot(claim.poll.chatId);
@@ -390,12 +455,99 @@ async function ensurePublicationElectorate(
   if (electorate.length === 0) {
     throw new Error('Poll electorate is empty.');
   }
+  if (
+    claim.poll.definition.ballotDelivery === 'private'
+    && electorate.length > maxPrivateElectorateSize
+  ) {
+    throw new CanonicalPollPublicationError(
+      `Private poll electorate ${electorate.length} exceeds configured maximum ${maxPrivateElectorateSize}.`
+    );
+  }
   return capturePollElectorate(db, {
     roundId: claim.round.id,
     claimToken: claim.claimToken,
     electorate,
     capturedAt: participantSnapshot.observedAt.toISOString()
   });
+}
+
+async function activatePrivatePollRound(
+  context: PluginRuntimeContext,
+  claim: PollPublicationClaim,
+  snapshot: StoredPollRoundSnapshot,
+  clock: () => Date
+): Promise<void> {
+  const db = pollsDatabase(context.databases);
+  if (!snapshot.round.publicationStartedAt) {
+    startPollRoundPublicationAttempt(db, {
+      roundId: claim.round.id,
+      claimToken: claim.claimToken,
+      startedAt: clock().toISOString()
+    });
+  }
+  const issuances = ensurePollPrivateIssuancesForCapturedElectorate(db, {
+    roundId: claim.round.id,
+    claimToken: claim.claimToken,
+    createdAt: clock().toISOString()
+  });
+  const activatedAt = clock();
+  const activated = markPrivatePollRoundPublished(db, {
+    roundId: claim.round.id,
+    claimToken: claim.claimToken,
+    acceptedAt: activatedAt.toISOString()
+  });
+  const current = getPollLifecycleByRoundId(db, claim.round.id);
+  if (!activated && current?.round.status !== 'open') {
+    throw new Error(`Private poll round ${claim.round.id} changed before activation.`);
+  }
+  let slot = 0;
+  for (const issuance of issuances) {
+    if (issuance.status === 'sent' || issuance.status === 'failed') {
+      continue;
+    }
+    await enqueuePollPrivateIssueJob(context, {
+      scopeId: claim.poll.scopeId,
+      issuanceId: issuance.id,
+      ...(claim.poll.groupId ? { groupId: claim.poll.groupId } : {}),
+      groupWid: claim.poll.chatId,
+      attempt: issuance.attempt + 1,
+      runAt: new Date(activatedAt.getTime() + slot * POLL_PRIVATE_ISSUANCE_PACING_MS)
+    });
+    slot += 1;
+  }
+  const published = getPollLifecycleByRoundId(db, claim.round.id);
+  if (published?.round.closesAt) {
+    await enqueuePollFinalizeJob(context, {
+      scopeId: claim.poll.scopeId,
+      pollId: claim.poll.id,
+      roundId: claim.round.id,
+      ...(claim.poll.groupId ? { groupId: claim.poll.groupId } : {}),
+      groupWid: claim.poll.chatId,
+      attempt: published.round.finalizationAttempt + 1,
+      runAt: new Date(published.round.closesAt)
+    });
+  }
+}
+
+function requirePrivateFanoutWindow(
+  snapshot: StoredPollRoundSnapshot,
+  electorateSize: number,
+  activationAt: Date
+): void {
+  const minimumRemainingMs = Math.max(0, electorateSize - 1) * POLL_PRIVATE_ISSUANCE_PACING_MS
+    + POLL_PRIVATE_MINIMUM_VOTING_WINDOW_MS;
+  const closing = snapshot.poll.definition.closing;
+  if (closing.kind !== 'deadline') {
+    return;
+  }
+  const remainingMs = closing.deadline.mode === 'at'
+    ? Date.parse(closing.deadline.closesAt) - activationAt.getTime()
+    : closing.deadline.durationMinutes * 60_000;
+  if (remainingMs < minimumRemainingMs) {
+    throw new CanonicalPollPublicationError(
+      `Private poll voting window must leave at least ${Math.ceil(minimumRemainingMs / 60_000)} minute(s) for paced ballot fanout and voting.`
+    );
+  }
 }
 
 function electorSortKey(elector: PollElector): string {

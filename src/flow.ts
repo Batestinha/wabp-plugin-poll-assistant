@@ -27,6 +27,8 @@ const MEASURE_RULE_STEP_ID = 'measure-rule';
 const COUNT_QUESTION_STEP_ID = 'count-question';
 const COUNT_UNIT_STEP_ID = 'count-unit';
 const COUNT_OPTIONS_STEP_ID = 'count-options';
+const BALLOT_DELIVERY_STEP_ID = 'ballot-delivery';
+const VOTER_DISCLOSURE_STEP_ID = 'voter-disclosure';
 const CONFIRM_VALUE = 'yes';
 
 export type PollCreationPurpose = 'decide' | 'measure' | 'count';
@@ -71,7 +73,9 @@ export interface PollCreationAnswers {
   rule: PollCreationRuleAnswer;
   closing: PollCreationClosingAnswer;
   quorum: PollCreationQuorumAnswer;
-  tiePolicy?: 'no_decision' | 'authorized_choice' | 'status_quo' | undefined;
+  ballotDelivery: 'group' | 'private';
+  voterDisclosure: 'named' | 'hidden';
+  tiePolicy?: 'no_decision' | 'authorized_choice' | 'status_quo' | 'random_draw' | undefined;
 }
 
 export function createPollCreationFlowDefinition(input: {
@@ -156,7 +160,11 @@ export function pollDefinitionFromCreationAnswers(input: {
     options,
     closing,
     quorum: input.answers.quorum,
-    electorate: { kind: 'members_at_publication' as const }
+    electorate: input.answers.ballotDelivery === 'private'
+      ? { kind: 'group_members_until_cutoff' as const }
+      : { kind: 'members_at_publication' as const },
+    ballotDelivery: input.answers.ballotDelivery,
+    voterDisclosure: input.answers.voterDisclosure
   };
   if (input.answers.rule.purpose === 'count') {
     return pollDefinitionSchema.parse({
@@ -202,6 +210,9 @@ function buildPollCreationFlowDefinition(input: {
   preferences: PollCreationFlowPreferences;
   initialData: Record<string, unknown>;
 }): FlowDefinition {
+  const preset = input.preferences.preset;
+  const decideRulePreset = preset?.decideRule;
+  const countUnitPreset = preset?.countUnit;
   const steps: FlowDefinition['steps'] = {
     [PURPOSE_STEP_ID]: {
       id: PURPOSE_STEP_ID,
@@ -286,9 +297,9 @@ function buildPollCreationFlowDefinition(input: {
     [DECIDE_SEATS_STEP_ID]: {
       id: DECIDE_SEATS_STEP_ID,
       kind: 'text',
-      prompt: input.preferences.preset?.decideRule.mode === 'suggest'
+      prompt: decideRulePreset?.mode === 'suggest'
         ? input.t('official.poll-assistant.flow.seats.suggested', {
-            seats: input.preferences.preset.decideRule.seats
+            seats: decideRulePreset.seats
           })
         : input.t('official.poll-assistant.flow.seats'),
       resolveInput: (resolution) => resolveSeats(resolution, input.t),
@@ -297,9 +308,9 @@ function buildPollCreationFlowDefinition(input: {
     [DECIDE_THRESHOLD_STEP_ID]: {
       id: DECIDE_THRESHOLD_STEP_ID,
       kind: 'text',
-      prompt: input.preferences.preset?.decideRule.mode === 'suggest'
+      prompt: decideRulePreset?.mode === 'suggest'
         ? input.t('official.poll-assistant.flow.threshold.suggested', {
-            threshold: formatBasisPoints(input.preferences.preset.decideRule.minimumApprovalBasisPoints)
+            threshold: formatBasisPoints(decideRulePreset.minimumApprovalBasisPoints)
           })
         : input.t('official.poll-assistant.flow.threshold'),
       resolveInput: (resolution) => resolvePercentage(resolution.input, {
@@ -350,9 +361,9 @@ function buildPollCreationFlowDefinition(input: {
     [COUNT_UNIT_STEP_ID]: {
       id: COUNT_UNIT_STEP_ID,
       kind: 'text',
-      prompt: input.preferences.preset?.countUnit.mode === 'suggest'
+      prompt: countUnitPreset?.mode === 'suggest'
         ? input.t('official.poll-assistant.flow.unit.suggested', {
-            unit: input.preferences.preset.countUnit.value
+            unit: countUnitPreset.value
           })
         : input.t('official.poll-assistant.flow.unit'),
       resolveInput: (resolution) => {
@@ -370,6 +381,30 @@ function buildPollCreationFlowDefinition(input: {
       t: input.t,
       count: true
     }),
+    [BALLOT_DELIVERY_STEP_ID]: {
+      id: BALLOT_DELIVERY_STEP_ID,
+      kind: 'choice',
+      prompt: input.t('official.poll-assistant.flow.ballotDelivery'),
+      options: ballotDeliveryOptions(input.t, input.preferences.preset),
+      optionsForState: () => ballotDeliveryOptions(input.t, input.preferences.preset),
+      minSelections: 1,
+      maxSelections: 1,
+      nextStepId: VOTER_DISCLOSURE_STEP_ID
+    },
+    [VOTER_DISCLOSURE_STEP_ID]: {
+      id: VOTER_DISCLOSURE_STEP_ID,
+      kind: 'choice',
+      prompt: input.t('official.poll-assistant.flow.voterDisclosure'),
+      options: voterDisclosureOptions(input.t, input.preferences.preset, 'group'),
+      optionsForState: (state) => voterDisclosureOptions(
+        input.t,
+        input.preferences.preset,
+        selectedValue(state.data[BALLOT_DELIVERY_STEP_ID]) === 'private' ? 'private' : 'group'
+      ),
+      minSelections: 1,
+      maxSelections: 1,
+      nextStepId: POLL_CREATION_CONFIRM_STEP_ID
+    },
     [POLL_CREATION_CONFIRM_STEP_ID]: {
       id: POLL_CREATION_CONFIRM_STEP_ID,
       kind: 'choice',
@@ -455,6 +490,12 @@ export function pollCreationPresetInitialData(
   if (preset.tiePolicy.mode === 'fixed') {
     data[tiePolicyStepId()] = [preset.tiePolicy.kind];
   }
+  if (preset.ballotDelivery.mode === 'fixed') {
+    data[BALLOT_DELIVERY_STEP_ID] = [preset.ballotDelivery.value];
+  }
+  if (preset.voterDisclosure.mode === 'fixed') {
+    data[VOTER_DISCLOSURE_STEP_ID] = [preset.voterDisclosure.value];
+  }
   return data;
 }
 
@@ -536,6 +577,8 @@ function fixedCreationStepIds(preset: PollCreationPreset): Set<string> {
     }
   }
   if (preset.tiePolicy.mode === 'fixed') ids.add(tiePolicyStepId());
+  if (preset.ballotDelivery.mode === 'fixed') ids.add(BALLOT_DELIVERY_STEP_ID);
+  if (preset.voterDisclosure.mode === 'fixed') ids.add(VOTER_DISCLOSURE_STEP_ID);
   return ids;
 }
 
@@ -618,7 +661,7 @@ function lifecycleSteps(
   const quorumId = quorumStepId(purpose);
   const quorumAbsoluteId = quorumAbsoluteStepId(purpose);
   const quorumPercentageId = quorumPercentageStepId(purpose);
-  const afterQuorum = purpose === 'decide' ? tiePolicyStepId() : POLL_CREATION_CONFIRM_STEP_ID;
+  const afterQuorum = purpose === 'decide' ? tiePolicyStepId() : BALLOT_DELIVERY_STEP_ID;
   const closingOptions = orderedByPreferred([
     { label: t('official.poll-assistant.flow.closing.duration'), value: 'duration' },
     { label: t('official.poll-assistant.flow.closing.deadline'), value: 'deadline' },
@@ -726,7 +769,8 @@ function lifecycleSteps(
               {
                 label: t('official.poll-assistant.flow.tiePolicy.authorizedChoice'),
                 value: 'authorized_choice'
-              }
+              },
+              { label: t('official.poll-assistant.flow.tiePolicy.randomDraw'), value: 'random_draw' }
             ], preferredTiePolicy(preferences.preset)),
             optionsForState: (state) => {
               const options = [
@@ -734,7 +778,8 @@ function lifecycleSteps(
                 {
                   label: t('official.poll-assistant.flow.tiePolicy.authorizedChoice'),
                   value: 'authorized_choice'
-                }
+                },
+                { label: t('official.poll-assistant.flow.tiePolicy.randomDraw'), value: 'random_draw' }
               ];
               const available = selectedValue(state.data[DECIDE_RULE_STEP_ID]) === 'approve_reject'
                 ? [...options, {
@@ -746,7 +791,7 @@ function lifecycleSteps(
             },
             minSelections: 1,
             maxSelections: 1,
-            nextStepId: POLL_CREATION_CONFIRM_STEP_ID
+            nextStepId: BALLOT_DELIVERY_STEP_ID
           }
         }
       : {})
@@ -867,7 +912,17 @@ function pollCreationAnswersFromState(state: FlowState): PollCreationAnswers | u
   const options = optionAnswers(state.data[optionsStep]);
   const closing = closingAnswer(state, purpose);
   const quorum = quorumAnswer(state, purpose);
-  if (!question || !options || !closing || !quorum) {
+  const ballotDelivery = selectedValue(state.data[BALLOT_DELIVERY_STEP_ID]);
+  const voterDisclosure = selectedValue(state.data[VOTER_DISCLOSURE_STEP_ID]);
+  if (
+    !question
+    || !options
+    || !closing
+    || !quorum
+    || (ballotDelivery !== 'group' && ballotDelivery !== 'private')
+    || (voterDisclosure !== 'named' && voterDisclosure !== 'hidden')
+    || (ballotDelivery === 'group' && voterDisclosure === 'hidden')
+  ) {
     return undefined;
   }
   const rule = ruleAnswer(state, purpose);
@@ -875,20 +930,40 @@ function pollCreationAnswersFromState(state: FlowState): PollCreationAnswers | u
     return undefined;
   }
   if (purpose !== 'decide') {
-    return { purpose, question, options, rule, closing, quorum } as PollCreationAnswers;
+    return {
+      purpose,
+      question,
+      options,
+      rule,
+      closing,
+      quorum,
+      ballotDelivery,
+      voterDisclosure
+    } as PollCreationAnswers;
   }
   const tiePolicy = selectedValue(state.data[tiePolicyStepId()]);
   if (
     tiePolicy !== 'no_decision'
     && tiePolicy !== 'authorized_choice'
     && tiePolicy !== 'status_quo'
+    && tiePolicy !== 'random_draw'
   ) {
     return undefined;
   }
   if (tiePolicy === 'status_quo' && rule.kind !== 'approve_reject') {
     return undefined;
   }
-  return { purpose, question, options, rule, closing, quorum, tiePolicy };
+  return {
+    purpose,
+    question,
+    options,
+    rule,
+    closing,
+    quorum,
+    ballotDelivery,
+    voterDisclosure,
+    tiePolicy
+  };
 }
 
 function ruleAnswer(state: FlowState, purpose: PollCreationPurpose): PollCreationRuleAnswer | undefined {
@@ -966,6 +1041,8 @@ function pollCreationPreviewParams(state: FlowState, t: TranslateFn): Record<str
     tiePolicy: answers.tiePolicy
       ? t(`official.poll-assistant.flow.tiePolicy.${tiePolicyMessageSuffix(answers.tiePolicy)}`)
       : t('official.poll-assistant.flow.summary.tie.none'),
+    ballotDelivery: t(`official.poll-assistant.flow.ballotDelivery.${answers.ballotDelivery}`),
+    voterDisclosure: t(`official.poll-assistant.flow.voterDisclosure.${answers.voterDisclosure}`),
     options: answers.options.map((option, index) => t(
       option.numericValue === undefined
         ? 'official.poll-assistant.flow.summary.option'
@@ -988,6 +1065,8 @@ function emptyPreviewParams(t: TranslateFn): Record<string, string> {
     closing: empty,
     quorum: empty,
     tiePolicy: empty,
+    ballotDelivery: empty,
+    voterDisclosure: empty,
     options: empty
   };
 }
@@ -1118,7 +1197,39 @@ function tiePolicyMessageSuffix(policy: NonNullable<PollCreationAnswers['tiePoli
     case 'no_decision': return 'noDecision';
     case 'authorized_choice': return 'authorizedChoice';
     case 'status_quo': return 'statusQuo';
+    case 'random_draw': return 'randomDraw';
   }
+}
+
+function ballotDeliveryOptions(t: TranslateFn, preset: PollCreationPreset | undefined) {
+  const options = preset?.voterDisclosure.mode === 'fixed'
+    && preset.voterDisclosure.value === 'hidden'
+    ? [{ label: t('official.poll-assistant.flow.ballotDelivery.private'), value: 'private' }]
+    : [
+        { label: t('official.poll-assistant.flow.ballotDelivery.group'), value: 'group' },
+        { label: t('official.poll-assistant.flow.ballotDelivery.private'), value: 'private' }
+      ];
+  return orderedByPreferred(
+    options,
+    preset && preset.ballotDelivery.mode !== 'ask' ? preset.ballotDelivery.value : 'group'
+  );
+}
+
+function voterDisclosureOptions(
+  t: TranslateFn,
+  preset: PollCreationPreset | undefined,
+  ballotDelivery: 'group' | 'private'
+) {
+  const options = ballotDelivery === 'group'
+    ? [{ label: t('official.poll-assistant.flow.voterDisclosure.named'), value: 'named' }]
+    : [
+        { label: t('official.poll-assistant.flow.voterDisclosure.named'), value: 'named' },
+        { label: t('official.poll-assistant.flow.voterDisclosure.hidden'), value: 'hidden' }
+      ];
+  return orderedByPreferred(
+    options,
+    preset && preset.voterDisclosure.mode !== 'ask' ? preset.voterDisclosure.value : 'named'
+  );
 }
 
 function formatBasisPoints(basisPoints: number): string {
