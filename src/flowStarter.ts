@@ -185,6 +185,7 @@ export class PollCreationFlowStarter {
     const t = this.context.i18n.translator(recipe.locale, recipe.languagePackScopes);
     const definition = createPollCreationFlowDefinition({
       t,
+      locale: recipe.locale,
       preferences: recipe.preferences,
       flowInstanceId: recipe.pollId,
       initialData
@@ -225,6 +226,7 @@ export class PollCreationFlowStarter {
     const definition = restorePollCreationFlowDefinition({
       flowType: recipe.flowType,
       t,
+      locale: recipe.locale,
       preferences: recipe.preferences,
       initialData: snapshot.state.data
     });
@@ -264,6 +266,7 @@ export function registerPollCreationFlowDefinitionResolver(
       const definition = restorePollCreationFlowDefinition({
         flowType: recipe.flowType,
         t,
+        locale: recipe.locale,
         preferences: recipe.preferences,
         initialData: session.state.data
       });

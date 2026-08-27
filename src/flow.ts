@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { z } from 'zod';
 import type { FlowDefinition, FlowState, FlowStep } from '../../../adminBot/flows/flowTypes';
 import type { FlowSessionSnapshot } from '../../../adminBot/flows/flowEngine';
 import type { TranslateFn } from '../../../platform/i18n';
+import { chronoParserForLocale } from '../../../platform/naturalDate/chronoLocale';
+import { parseLocalizedDateTimeInput } from '../../../platform/naturalDate/localizedDateTime';
 import {
   WHATSAPP_POLL_MAX_OPTIONS,
   WHATSAPP_POLL_MIN_OPTIONS,
@@ -80,6 +81,7 @@ export interface PollCreationAnswers {
 
 export function createPollCreationFlowDefinition(input: {
   t: TranslateFn;
+  locale: string;
   preferences: PollCreationFlowPreferences;
   flowInstanceId?: string | undefined;
   initialData?: Record<string, unknown> | undefined;
@@ -88,6 +90,7 @@ export function createPollCreationFlowDefinition(input: {
   return buildPollCreationFlowDefinition({
     flowType: `${POLL_CREATION_FLOW_TYPE_PREFIX}${flowInstanceId}`,
     t: input.t,
+    locale: input.locale,
     preferences: input.preferences,
     initialData: input.initialData ?? {}
   });
@@ -96,6 +99,7 @@ export function createPollCreationFlowDefinition(input: {
 export function restorePollCreationFlowDefinition(input: {
   flowType: string;
   t: TranslateFn;
+  locale: string;
   preferences: PollCreationFlowPreferences;
   initialData: Record<string, unknown>;
 }): FlowDefinition {
@@ -207,6 +211,7 @@ export function pollDefinitionFromCreationAnswers(input: {
 function buildPollCreationFlowDefinition(input: {
   flowType: string;
   t: TranslateFn;
+  locale: string;
   preferences: PollCreationFlowPreferences;
   initialData: Record<string, unknown>;
 }): FlowDefinition {
@@ -423,7 +428,7 @@ function buildPollCreationFlowDefinition(input: {
   };
 
   for (const purpose of ['decide', 'measure', 'count'] as const) {
-    Object.assign(steps, lifecycleSteps(purpose, input.t, input.preferences));
+    Object.assign(steps, lifecycleSteps(purpose, input.t, input.locale, input.preferences));
   }
 
   return applyFixedCreationPolicy({
@@ -653,6 +658,7 @@ function optionStep(input: {
 function lifecycleSteps(
   purpose: PollCreationPurpose,
   t: TranslateFn,
+  locale: string,
   preferences: PollCreationFlowPreferences
 ): Record<string, FlowStep> {
   const closingId = closingStepId(purpose);
@@ -702,16 +708,28 @@ function lifecycleSteps(
     [deadlineId]: {
       id: deadlineId,
       kind: 'text',
-      prompt: t('official.poll-assistant.flow.deadline', {
+      prompt: t(chronoParserForLocale(locale)
+        ? 'official.poll-assistant.flow.deadline'
+        : 'official.poll-assistant.flow.deadline.strict', {
         timezone: preferences.timezone,
         maximumMinutes: preferences.maxDeadlineMinutes
       }),
       resolveInput: (resolution) => resolveDeadline(
         resolution.input,
+        preferences.timezone,
+        locale,
         preferences.maxDeadlineMinutes,
-        t('official.poll-assistant.flow.deadline.invalid', {
-          maximumMinutes: preferences.maxDeadlineMinutes
-        })
+        {
+          invalid: t('official.poll-assistant.flow.deadline.invalid'),
+          missingTime: t('official.poll-assistant.flow.deadline.missingTime'),
+          past: t('official.poll-assistant.flow.deadline.past'),
+          tooFar: t('official.poll-assistant.flow.deadline.tooFar', {
+            maximumMinutes: preferences.maxDeadlineMinutes
+          }),
+          unsupportedLocale: t('official.poll-assistant.flow.deadline.unsupportedLocale', {
+            timezone: preferences.timezone
+          })
+        }
       ),
       nextStepId: quorumId
     },
@@ -839,17 +857,38 @@ function resolvePercentage(
 
 function resolveDeadline(
   raw: string,
+  timezone: string,
+  locale: string,
   maxDeadlineMinutes: number,
-  error: string
+  errors: {
+    invalid: string;
+    missingTime: string;
+    past: string;
+    tooFar: string;
+    unsupportedLocale: string;
+  }
 ): ReturnType<NonNullable<FlowStep['resolveInput']>> {
-  const parsed = z.string().datetime({ offset: true }).safeParse(raw.trim());
-  const closesAt = parsed.success ? Date.parse(parsed.data) : Number.NaN;
-  const now = Date.now();
-  return parsed.success
-    && closesAt > now
-    && closesAt - now <= maxDeadlineMinutes * 60_000
-    ? { status: 'use-value', value: new Date(parsed.data).toISOString() }
-    : { status: 'error', reply: error };
+  const now = new Date();
+  const parsed = parseLocalizedDateTimeInput(raw, { timezone, locale, now });
+  if (parsed.status === 'missing_time') {
+    return { status: 'error', reply: errors.missingTime };
+  }
+  if (parsed.status === 'invalid') {
+    return {
+      status: 'error',
+      reply: parsed.reason === 'unsupported_locale'
+        ? errors.unsupportedLocale
+        : errors.invalid
+    };
+  }
+  const remainingMilliseconds = parsed.date.getTime() - now.getTime();
+  if (remainingMilliseconds <= 0) {
+    return { status: 'error', reply: errors.past };
+  }
+  if (remainingMilliseconds > maxDeadlineMinutes * 60_000) {
+    return { status: 'error', reply: errors.tooFar };
+  }
+  return { status: 'use-value', value: parsed.date.toISOString() };
 }
 
 function parseOptions(raw: string): PollCreationOptionAnswer[] | undefined {
