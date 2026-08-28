@@ -812,7 +812,7 @@ async function openPoll(context: PluginCommandContext, ctx: CommandContext) {
     selection.aggregate.poll.id
   );
   const round = aggregate ? latestRound(aggregate) : undefined;
-  if (!actorIdentityId || !round) {
+  if (!actorIdentityId || !aggregate || !round) {
     return { handled: true, text: ctx.t('official.poll-assistant.identityUnavailable') };
   }
   if (!isScheduleDeferredPoll(aggregate)) {
