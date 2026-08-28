@@ -97,11 +97,19 @@ export const pollAssistantControls: ControlDescriptor[] = [
     }
   ),
   control(
-    'automationWorkingHours',
-    'Automation working hours',
-    'Weekly local-time windows that gate automated poll publication and first-response activation. Overnight windows are supported; manual polls are unaffected.',
+    'automationWorkingHours.enabled',
+    'Enforce automation working hours',
+    'Gate automated poll publication and first-response activation to the configured weekly windows. Manual polls are unaffected.',
     50,
-    { type: 'object' },
+    { type: 'boolean' },
+    { widget: 'toggle' }
+  ),
+  control(
+    'automationWorkingHours.windows',
+    'Automation working-hours windows',
+    'Weekly local-time windows that gate automated poll publication and first-response activation. Multiple and overnight windows are supported.',
+    60,
+    { type: 'array', items: { type: 'object' } },
     { widget: 'builder', builderId: 'official.poll-assistant.working-hours.v1' }
   ),
   control(
