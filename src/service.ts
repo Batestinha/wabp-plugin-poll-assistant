@@ -44,6 +44,10 @@ import {
   recordPollAutomationAction,
   type StoredPollAggregate
 } from './store';
+import {
+  pollAssistantAutomationPolicySnapshotSchema,
+  pollAssistantPolicyNotBefore
+} from './workingHours';
 
 export function registerPollAssistantServices(
   context: PluginServiceRegistrationContext
@@ -115,10 +119,12 @@ async function ensureAutomatedPoll(
   assertGroupContext(input.groupWid, call.groupWid);
   const actor = requireOrganizer(call.actorIdentityId, call.actorWid);
   const definition = input.definition;
+  const bypassWorkingHours = input.bypassWorkingHours ?? false;
   const requestSha256 = digestJson({
     groupWid: input.groupWid,
     organizerIdentityId: actor.identityId,
-    definition
+    definition,
+    bypassWorkingHours
   });
   const db = pollsDatabase(context.databases);
   const existing = getPollAggregateBySource(db, {
@@ -145,6 +151,25 @@ async function ensureAutomatedPoll(
   const roundId = `poll-round:${digest}`;
   const publishIdempotencyKey = `poll-assistant:auto:${digest}`;
   const createdAt = new Date().toISOString();
+  const automationPolicy = pollAssistantAutomationPolicySnapshotSchema.parse({
+    timezone: config.timezone,
+    workingHours: config.automationWorkingHours,
+    bypassWorkingHours
+  });
+  const publicationNotBefore = pollAssistantPolicyNotBefore(
+    new Date(createdAt),
+    automationPolicy
+  );
+  const firstResponseClosing = definition.closing.kind === 'deadline'
+    && definition.closing.deadline.mode === 'after_first_non_creator_response'
+    ? definition.closing.deadline
+    : undefined;
+  if (
+    firstResponseClosing?.activationCutoffAt
+    && publicationNotBefore.getTime() > Date.parse(firstResponseClosing.activationCutoffAt)
+  ) {
+    throw new Error('The next allowed Poll Assistant working window starts after the lifecycle activation cutoff.');
+  }
   const creatorLabel = await organizerLabel(context, actor.wid, actor.identityId);
   let aggregate: StoredPollAggregate;
   try {
@@ -163,6 +188,7 @@ async function ensureAutomatedPoll(
         idempotencyKey: input.sourceIdempotencyKey,
         requestSha256
       },
+      automationPolicy,
       maxActivePollsPerChat: config.maxActivePollsPerChat,
       createdAt
     });
@@ -179,7 +205,8 @@ async function ensureAutomatedPoll(
     roundId: round.id,
     ...(aggregate.poll.groupId ? { groupId: aggregate.poll.groupId } : {}),
     groupWid: aggregate.poll.chatId,
-    attempt: round.publicationAttempt + 1
+    attempt: round.publicationAttempt + 1,
+    runAt: new Date(round.publicationNotBefore)
   });
   await context.audit.record({
     actorIdentityId: actor.identityId,
@@ -196,7 +223,10 @@ async function ensureAutomatedPoll(
       sourceIdempotencyKey: input.sourceIdempotencyKey,
       ballotDelivery: definition.ballotDelivery,
       voterDisclosure: definition.voterDisclosure,
-      electorateKind: definition.electorate.kind
+      electorateKind: definition.electorate.kind,
+      bypassWorkingHours: automationPolicy.bypassWorkingHours,
+      workingHoursTimezone: automationPolicy.timezone,
+      publicationNotBefore: round.publicationNotBefore
     }
   });
   return pollAssistantEnsurePollOutputSchema.parse(automationEnvelope(aggregate, 'created'));
@@ -450,6 +480,12 @@ function automationEnvelope(
   kind: 'created' | 'existing' | 'found'
 ) {
   const round = aggregate.rounds.at(-1)!;
+  const workingHoursPolicy = aggregate.poll.automationPolicy
+    ?? pollAssistantAutomationPolicySnapshotSchema.parse({
+      timezone: 'UTC',
+      workingHours: {},
+      bypassWorkingHours: true
+    });
   return {
     kind,
     sourcePluginId: aggregate.poll.source!.pluginId,
@@ -463,6 +499,12 @@ function automationEnvelope(
     ballotDelivery: aggregate.poll.definition.ballotDelivery,
     voterDisclosure: aggregate.poll.definition.voterDisclosure,
     electorate: aggregate.poll.definition.electorate,
+    publicationNotBefore: round.publicationNotBefore,
+    activationDeadlineAt: round.activationDeadlineAt ?? null,
+    activatedAt: round.activatedAt ?? null,
+    closesAt: round.closesAt ?? null,
+    workingHoursPolicy,
+    workingHoursOverrideAt: round.workingHoursOverrideAt ?? null,
     options: [...aggregate.poll.definition.options]
       .sort((left, right) => left.ordinal - right.ordinal)
       .map((option) => ({ id: option.id, label: option.label, ordinal: option.ordinal }))

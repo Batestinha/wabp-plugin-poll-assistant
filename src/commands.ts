@@ -42,6 +42,7 @@ import {
   getPollAggregate,
   getPollDelivery,
   getPollResult,
+  overridePollWorkingHours,
   listPollsByChat,
   PollActiveLimitReachedError,
   PollTieResultDeliveryPendingError,
@@ -55,6 +56,7 @@ import {
   enqueuePollDeliveryJob,
   enqueuePollPublishJob
 } from './jobs';
+import { reconcilePollRoundTiming } from './timing';
 import {
   actorCanManagePoll,
   latestPollRound,
@@ -181,6 +183,15 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
     exampleKey: 'official.poll-assistant.help.close.example',
     topicId: 'manage'
   }), async (ctx) => closePoll(context, ctx));
+
+  context.router.register('poll', 'open', pollCommand({
+    dangerous: true,
+    auditAction: 'poll-assistant.open',
+    usage: '/poll open [poll ID or question] [--confirm]',
+    descriptionKey: 'official.poll-assistant.help.open',
+    exampleKey: 'official.poll-assistant.help.open.example',
+    topicId: 'manage'
+  }), async (ctx) => openPoll(context, ctx));
 
   context.router.register('poll', 'cancel', pollCommand({
     dangerous: true,
@@ -748,31 +759,193 @@ async function pollStatus(context: PluginCommandContext, ctx: CommandContext) {
 async function closePoll(context: PluginCommandContext, ctx: CommandContext) {
   const runtime = requireOfficialCommandRuntime(context);
   const args = commandArgs(ctx);
-  if (!args.includes('--confirm')) {
-    return { handled: true, text: ctx.t('official.poll-assistant.confirmRequired') };
-  }
-  const lookup = lookupPollForCurrentGroup(runtime.databases, ctx);
-  if (lookup.kind !== 'found') {
-    return { handled: true, text: lookup.text };
-  }
-  if (!await canManagePoll(context, ctx, lookup.aggregate.poll)) {
+  const selection = await selectManageablePoll(context, runtime, ctx, isManuallyClosablePoll);
+  if (selection.kind !== 'selected') return { handled: true, text: selection.text };
+  if (!args.includes('--confirm')) return confirmationReply(ctx, 'close', selection.aggregate);
+  const aggregate = getPollAggregate(
+    pollsDatabase(runtime.databases),
+    selection.aggregate.poll.id
+  );
+  if (!aggregate || !await canManagePoll(context, ctx, aggregate.poll)) {
     return { handled: true, text: ctx.t('official.poll-assistant.lifecyclePermissionDenied') };
   }
-  const round = latestRound(lookup.aggregate);
-  if (!round || round.status !== 'open') {
+  const round = latestRound(aggregate);
+  if (!round || !isManuallyClosablePoll(aggregate)) {
     return { handled: true, text: ctx.t('official.poll-assistant.close.notOpen') };
   }
   const close = await requestPollClose({
     context,
     databases: runtime.databases,
-    aggregate: lookup.aggregate
+    aggregate
   });
   if (close.kind === 'not_open') {
     return { handled: true, text: ctx.t('official.poll-assistant.close.notOpen') };
   }
   return {
     handled: true,
-    text: ctx.t('official.poll-assistant.close.queued', { pollId: lookup.aggregate.poll.id })
+    text: ctx.t('official.poll-assistant.close.queued', { pollId: aggregate.poll.id })
+  };
+}
+
+function isManuallyClosablePoll(aggregate: StoredPollAggregate): boolean {
+  const round = latestRound(aggregate);
+  return Boolean(
+    round?.status === 'open'
+    && (!round.closesAt || Date.parse(round.closesAt) > Date.now())
+  );
+}
+
+async function openPoll(context: PluginCommandContext, ctx: CommandContext) {
+  const runtime = requireOfficialCommandRuntime(context);
+  const args = commandArgs(ctx);
+  const selection = await selectManageablePoll(
+    context,
+    runtime,
+    ctx,
+    isScheduleDeferredPoll
+  );
+  if (selection.kind !== 'selected') return { handled: true, text: selection.text };
+  if (!args.includes('--confirm')) return confirmationReply(ctx, 'open', selection.aggregate);
+  const actorIdentityId = ctx.actor?.identityAddress.identityId;
+  const aggregate = getPollAggregate(
+    pollsDatabase(runtime.databases),
+    selection.aggregate.poll.id
+  );
+  const round = aggregate ? latestRound(aggregate) : undefined;
+  if (!actorIdentityId || !round) {
+    return { handled: true, text: ctx.t('official.poll-assistant.identityUnavailable') };
+  }
+  if (!isScheduleDeferredPoll(aggregate)) {
+    return { handled: true, text: ctx.t('official.poll-assistant.open.unavailable') };
+  }
+  if (!await canManagePoll(context, ctx, aggregate.poll)) {
+    return { handled: true, text: ctx.t('official.poll-assistant.lifecyclePermissionDenied') };
+  }
+  const overriddenAt = new Date();
+  const result = overridePollWorkingHours(pollsDatabase(runtime.databases), {
+    pollId: aggregate.poll.id,
+    roundId: round.id,
+    actorIdentityId,
+    overriddenAt: overriddenAt.toISOString()
+  });
+  if (result === 'unavailable') {
+    return { handled: true, text: ctx.t('official.poll-assistant.open.unavailable') };
+  }
+  if (result === 'publication') {
+    await enqueuePollPublishJob(context, {
+      scopeId: aggregate.poll.scopeId,
+      pollId: aggregate.poll.id,
+      roundId: round.id,
+      ...(aggregate.poll.groupId ? { groupId: aggregate.poll.groupId } : {}),
+      groupWid: aggregate.poll.chatId,
+      attempt: round.publicationAttempt + 1,
+      runAt: overriddenAt
+    });
+  } else {
+    await reconcilePollRoundTiming({
+      databases: runtime.databases,
+      queue: context.queue,
+      i18n: context.i18n,
+      configFor: runtime.configFor
+    }, round.id, overriddenAt);
+  }
+  return {
+    handled: true,
+    text: ctx.t('official.poll-assistant.open.done', { pollId: aggregate.poll.id })
+  };
+}
+
+function isScheduleDeferredPoll(aggregate: StoredPollAggregate): boolean {
+  const round = latestRound(aggregate);
+  return Boolean(
+    aggregate.poll.source
+    && aggregate.poll.automationPolicy
+    && !aggregate.poll.bypassWorkingHours
+    && aggregate.poll.status === 'active'
+    && !aggregate.poll.workingHoursOverrideAt
+    && round
+    && (
+      (round.status === 'publish_pending'
+        && Date.parse(round.publicationNotBefore) > Date.now())
+      || (round.status === 'open' && !round.closesAt && !round.activatedAt)
+    )
+  );
+}
+
+type ManageablePollSelection =
+  | { kind: 'selected'; aggregate: StoredPollAggregate }
+  | { kind: 'reply'; text: string };
+
+async function selectManageablePoll(
+  context: PluginCommandContext,
+  runtime: OfficialPluginCommandRuntime,
+  ctx: CommandContext,
+  stateFilter: (aggregate: StoredPollAggregate) => boolean
+): Promise<ManageablePollSelection> {
+  const groupWid = currentGroupWid(ctx);
+  if (!groupWid) {
+    return { kind: 'reply', text: ctx.t('official.poll-assistant.groupRequired') };
+  }
+  const aggregates = listPollsByChat(pollsDatabase(runtime.databases), groupWid, POLL_LIST_LIMIT)
+    .filter((poll) => poll.scopeId === requireScopeId(ctx))
+    .flatMap((poll) => {
+      const aggregate = getPollAggregate(pollsDatabase(runtime.databases), poll.id);
+      return aggregate ? [aggregate] : [];
+    });
+  const target = commandArgs(ctx).filter((arg) => arg !== '--confirm').join(' ').trim();
+  const stateCandidates = aggregates.filter(stateFilter);
+  let targeted = stateCandidates;
+  if (target) {
+    const normalized = target.toLocaleLowerCase(ctx.locale);
+    const exactId = stateCandidates.filter((aggregate) => aggregate.poll.id === target);
+    const exactQuestion = stateCandidates.filter((aggregate) =>
+      aggregate.poll.definition.question.toLocaleLowerCase(ctx.locale) === normalized);
+    targeted = exactId.length > 0
+      ? exactId
+      : exactQuestion.length > 0
+        ? exactQuestion
+        : stateCandidates.filter((aggregate) =>
+            aggregate.poll.definition.question.toLocaleLowerCase(ctx.locale).includes(normalized));
+  }
+  const candidates: StoredPollAggregate[] = [];
+  for (const aggregate of targeted) {
+    if (await canManagePoll(context, ctx, aggregate.poll)) {
+      candidates.push(aggregate);
+    }
+  }
+  if (candidates.length === 1) {
+    return { kind: 'selected', aggregate: candidates[0]! };
+  }
+  if (candidates.length === 0) {
+    return {
+      kind: 'reply',
+      text: ctx.t('official.poll-assistant.manage.none', { target: target || '—' })
+    };
+  }
+  return {
+    kind: 'reply',
+    text: ctx.t('official.poll-assistant.manage.choose', {
+      polls: candidates.map((aggregate) => ctx.t('official.poll-assistant.manage.choice', {
+        question: aggregate.poll.definition.question,
+        pollId: aggregate.poll.id
+      })).join('\n')
+    })
+  };
+}
+
+function confirmationReply(
+  ctx: CommandContext,
+  action: 'open' | 'close',
+  aggregate: StoredPollAggregate
+) {
+  return {
+    handled: true,
+    text: ctx.t('official.poll-assistant.manage.confirm', {
+      action: ctx.t(`official.poll-assistant.manage.action.${action}`),
+      question: aggregate.poll.definition.question,
+      pollId: aggregate.poll.id,
+      command: `/poll ${action} ${aggregate.poll.id} --confirm`
+    })
   };
 }
 
@@ -1103,6 +1276,18 @@ function flowPreferences(
       ? { kind: 'manual' }
       : configuredClosing?.kind === 'duration'
         ? { kind: 'deadline', durationMinutes: configuredClosing.durationMinutes }
+        : configuredClosing?.kind === 'after_first_non_creator_response'
+          ? {
+              kind: 'after_first_non_creator_response',
+              durationMinutes: configuredClosing.durationMinutes,
+              activationTimeoutMinutes: configuredClosing.activationTimeoutMinutes ?? 120
+            }
+          : config.defaultClosingMode === 'after_first_non_creator_response'
+            ? {
+                kind: 'after_first_non_creator_response',
+                durationMinutes: config.defaultDeadlineMinutes,
+                activationTimeoutMinutes: config.defaultActivationTimeoutMinutes
+              }
         : config.defaultClosingMode === 'manual'
       ? { kind: 'manual' }
       : { kind: 'deadline', durationMinutes: config.defaultDeadlineMinutes },
@@ -1137,6 +1322,12 @@ function closingAllowedAtCompletion(
   }
   if (closing.kind === 'after_publish_duration') {
     return closing.durationMinutes >= 1 && closing.durationMinutes <= maxDeadlineMinutes;
+  }
+  if (closing.kind === 'after_first_non_creator_response') {
+    return closing.durationMinutes >= 1
+      && closing.durationMinutes <= maxDeadlineMinutes
+      && closing.activationTimeoutMinutes >= 1
+      && closing.activationTimeoutMinutes <= maxDeadlineMinutes;
   }
   const closesAt = Date.parse(closing.closesAt);
   const remainingMs = closesAt - now.getTime();
@@ -1183,6 +1374,12 @@ function closingLabel(
   }
   if (closing.deadline.mode === 'at') {
     return formatTimestamp(closing.deadline.closesAt, config.timezone, locale);
+  }
+  if (closing.deadline.mode === 'after_first_non_creator_response') {
+    return t('official.poll-assistant.flow.summary.afterFirstResponse', {
+      minutes: closing.deadline.durationMinutes,
+      timeoutMinutes: closing.deadline.activationTimeoutMinutes
+    });
   }
   return t('official.poll-assistant.flow.summary.duration', {
     minutes: closing.deadline.durationMinutes

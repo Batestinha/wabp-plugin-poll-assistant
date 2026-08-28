@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { pollAssistantWorkingHoursSchema } from './workingHours';
 
 const pollCreationFieldModeSchema = z.enum(['ask', 'suggest', 'fixed']);
 const pollPurposeSchema = z.enum(['decide', 'measure', 'count']);
@@ -37,8 +38,9 @@ const pollCountUnitPolicySchema = z.object({
 
 const pollClosingPolicySchema = z.object({
   mode: pollCreationFieldModeSchema.default('ask'),
-  kind: z.enum(['duration', 'manual']).default('duration'),
-  durationMinutes: z.number().int().min(1).max(31 * 24 * 60).default(24 * 60)
+  kind: z.enum(['duration', 'after_first_non_creator_response', 'manual']).default('duration'),
+  durationMinutes: z.number().int().min(1).max(31 * 24 * 60).default(24 * 60),
+  activationTimeoutMinutes: z.number().int().min(1).max(31 * 24 * 60).optional()
 }).strict().default({});
 
 const pollQuorumPolicySchema = z.object({
@@ -123,8 +125,9 @@ const pollAssistantConfigObjectSchema = z.object({
   allowCreation: z.boolean().default(true),
   allowMemberCreation: z.boolean().default(true),
   timezone: ianaTimezoneSchema.default('UTC'),
-  defaultClosingMode: z.enum(['deadline', 'manual']).default('deadline'),
+  defaultClosingMode: z.enum(['deadline', 'after_first_non_creator_response', 'manual']).default('deadline'),
   defaultDeadlineMinutes: z.number().int().min(1).max(31 * 24 * 60).default(24 * 60),
+  defaultActivationTimeoutMinutes: z.number().int().min(1).max(31 * 24 * 60).default(120),
   maxDeadlineMinutes: z.number().int().min(1).max(31 * 24 * 60).default(31 * 24 * 60),
   defaultQuorumMode: z.enum(['none', 'absolute', 'percentage']).default('none'),
   defaultAbsoluteQuorumResponses: z.number().int().min(1).max(100_000).default(1),
@@ -133,6 +136,7 @@ const pollAssistantConfigObjectSchema = z.object({
   maxPrivateElectorateSize: z.number().int().min(1).max(250).default(250),
   ballotRetentionDays: z.number().int().min(1).max(3_650).default(90),
   assistantExposeProvisionalResults: z.boolean().default(false),
+  automationWorkingHours: pollAssistantWorkingHoursSchema,
   creationPresets: z.array(pollCreationPresetSchema).max(20).default([])
 }).strict().superRefine((config, ctx) => {
   if (config.defaultDeadlineMinutes > config.maxDeadlineMinutes) {

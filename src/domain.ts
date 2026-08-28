@@ -40,6 +40,12 @@ export const pollClosingConditionSchema = z.discriminatedUnion('kind', [
       z.object({
         mode: z.literal('after_publish'),
         durationMinutes: z.number().int().min(1).max(31 * 24 * 60)
+      }).strict(),
+      z.object({
+        mode: z.literal('after_first_non_creator_response'),
+        durationMinutes: z.number().int().min(1).max(31 * 24 * 60),
+        activationTimeoutMinutes: z.number().int().min(1).max(31 * 24 * 60).default(120),
+        activationCutoffAt: isoTimestampSchema.optional()
       }).strict()
     ])
   }).strict(),
@@ -158,6 +164,17 @@ export const pollDefinitionSchema = z.discriminatedUnion('purpose', [
       code: z.ZodIssueCode.custom,
       message: 'Actor-only electorates require private ballot delivery',
       path: ['ballotDelivery']
+    });
+  }
+  if (
+    definition.electorate.kind === 'actor'
+    && definition.closing.kind === 'deadline'
+    && definition.closing.deadline.mode === 'after_first_non_creator_response'
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Actor-only electorates cannot wait for a non-creator response',
+      path: ['closing']
     });
   }
   const optionIds = definition.options.map((option) => option.id);

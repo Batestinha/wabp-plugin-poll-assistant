@@ -22,6 +22,11 @@ import {
   type PollResult
 } from './domain';
 import { describePollRandomDraw } from './resultCalculator';
+import {
+  pollAssistantAutomationPolicySnapshotSchema,
+  pollAssistantPolicyNotBefore,
+  type PollAssistantAutomationPolicySnapshot
+} from './workingHours';
 
 const timestampSchema = z.string().datetime({ offset: true });
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -38,7 +43,13 @@ export type PollRoundStatus =
   | 'failed';
 export type PollPublicationOutcome = 'not_attempted' | 'unknown' | 'accepted';
 export type PollDeliveryStatus = 'pending' | 'sending' | 'sent' | 'uncertain';
-export type PollDeliveryKind = 'result' | 'tie' | 'cancelled' | 'failure';
+export type PollDeliveryKind =
+  | 'result'
+  | 'tie'
+  | 'cancelled'
+  | 'failure'
+  | 'announcement'
+  | 'activation';
 export type PollPrivateIssuanceStatus = 'pending' | 'publishing' | 'sent' | 'uncertain' | 'failed';
 
 export interface StoredPollRandomDrawAudit {
@@ -75,6 +86,7 @@ export interface CreatePollInput {
     idempotencyKey: string;
     requestSha256: string;
   } | undefined;
+  automationPolicy?: PollAssistantAutomationPolicySnapshot | undefined;
   maxActivePollsPerChat: number;
   createdAt: string;
 }
@@ -90,6 +102,16 @@ export interface StoredPollRound {
   pollWaMessageId?: string | undefined;
   closesAt?: string | undefined;
   publishedAt?: string | undefined;
+  publicationNotBefore: string;
+  activationDeadlineAt?: string | undefined;
+  activationNotBefore?: string | undefined;
+  activatedAt?: string | undefined;
+  activationTriggerKind?: 'participant_response' | 'creator_timeout' | 'no_response_timeout' | undefined;
+  activationTriggerIdentityId?: string | undefined;
+  automationPolicy?: PollAssistantAutomationPolicySnapshot | undefined;
+  bypassWorkingHours: boolean;
+  workingHoursOverrideAt?: string | undefined;
+  announcementsRequired: boolean;
   finalizationAttempt: number;
   publicationAttempt: number;
   publicationClaimToken?: string | undefined;
@@ -132,6 +154,10 @@ export interface StoredPoll {
     idempotencyKey: string;
     requestSha256: string;
   } | undefined;
+  automationPolicy?: PollAssistantAutomationPolicySnapshot | undefined;
+  bypassWorkingHours: boolean;
+  workingHoursOverrideAt?: string | undefined;
+  workingHoursOverrideByIdentityId?: string | undefined;
 }
 
 export interface StoredPollAggregate {
@@ -168,7 +194,7 @@ export interface StoredPollRoundSnapshot {
 }
 
 export interface RecoverablePollRound {
-  kind: 'publication' | 'finalization';
+  kind: 'publication' | 'activation' | 'finalization';
   round: StoredPollRound;
 }
 
@@ -261,6 +287,11 @@ interface PollRow extends PluginDatabaseRow {
   source_request_sha256: string | null;
   rolling_membership_observed_at: string | null;
   rolling_membership_next_review_at: string | null;
+  automation_policy_json: string | null;
+  bypass_working_hours: number;
+  working_hours_override_at: string | null;
+  announcements_required: number;
+  working_hours_override_by_identity_id: string | null;
 }
 
 interface PollRoundRow extends PluginDatabaseRow {
@@ -289,6 +320,15 @@ interface PollRoundRow extends PluginDatabaseRow {
   created_at: string;
   updated_at: string;
   last_error: string | null;
+  automation_policy_json: string | null;
+  bypass_working_hours: number;
+  publication_not_before: string | null;
+  activation_deadline_at: string | null;
+  activation_not_before: string | null;
+  activated_at: string | null;
+  activation_trigger_kind: 'participant_response' | 'creator_timeout' | 'no_response_timeout' | null;
+  activation_trigger_identity_id: string | null;
+  working_hours_override_at: string | null;
 }
 
 interface ElectorRow extends PluginDatabaseRow {
@@ -379,6 +419,12 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
     idempotencyKey: required(input.source.idempotencyKey, 'source.idempotencyKey'),
     requestSha256: sha256Schema.parse(input.source.requestSha256)
   } : undefined;
+  const automationPolicy = input.automationPolicy
+    ? pollAssistantAutomationPolicySnapshotSchema.parse(input.automationPolicy)
+    : undefined;
+  if (Boolean(source) !== Boolean(automationPolicy)) {
+    throw new Error('Automated polls require a source and an immutable automation policy together.');
+  }
   if (!Number.isInteger(input.maxActivePollsPerChat) || input.maxActivePollsPerChat < 1) {
     throw new Error('maxActivePollsPerChat must be a positive integer.');
   }
@@ -399,6 +445,7 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
         roundId,
         publishIdempotencyKey,
         source,
+        automationPolicy,
         createdAt
       })) {
         throw new Error(`Poll id ${definition.id} is already bound to different canonical input.`);
@@ -417,8 +464,9 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
       `INSERT INTO polls (
          id, scope_id, chat_id, group_id, creator_identity_id, creator_wid, creator_label,
          purpose, definition_json, status, created_at, updated_at,
-         source_plugin_id, source_idempotency_key, source_request_sha256
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+         source_plugin_id, source_idempotency_key, source_request_sha256,
+         automation_policy_json, bypass_working_hours
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`,
       definition.id,
       scopeId,
       chatId,
@@ -432,13 +480,20 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
       createdAt,
       source?.pluginId ?? null,
       source?.idempotencyKey ?? null,
-      source?.requestSha256 ?? null
+      source?.requestSha256 ?? null,
+      automationPolicy ? JSON.stringify(automationPolicy) : null,
+      automationPolicy?.bypassWorkingHours ? 1 : automationPolicy ? 0 : 1
     );
+    const publicationNotBefore = automationPolicy
+      ? pollAssistantPolicyNotBefore(new Date(createdAt), automationPolicy).toISOString()
+      : createdAt;
     db.run(
       `INSERT INTO poll_rounds (
          id, poll_id, round_number, status, question, allow_multiple_answers,
-         publish_idempotency_key, closes_at, created_at, updated_at
-       ) VALUES (?, ?, 1, 'publish_pending', ?, ?, ?, ?, ?, ?)`,
+         publish_idempotency_key, closes_at, automation_policy_json,
+         bypass_working_hours, publication_not_before, publication_next_attempt_at,
+         announcements_required, created_at, updated_at
+       ) VALUES (?, ?, 1, 'publish_pending', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
       roundId,
       definition.id,
       definition.question,
@@ -447,6 +502,10 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
       definition.closing.kind === 'deadline' && definition.closing.deadline.mode === 'at'
         ? definition.closing.deadline.closesAt
         : null,
+      automationPolicy ? JSON.stringify(automationPolicy) : null,
+      automationPolicy?.bypassWorkingHours ? 1 : automationPolicy ? 0 : 1,
+      publicationNotBefore,
+      publicationNotBefore,
       createdAt,
       createdAt
     );
@@ -620,7 +679,8 @@ export function listPollCleanupCandidateIds(db: PluginDatabase, input: {
     `WITH terminal_polls AS (
        SELECT p.id,
               COALESCE(p.resolved_at, p.cancelled_at, p.updated_at) AS terminal_at,
-              (SELECT MAX(d.sent_at) FROM poll_deliveries d WHERE d.poll_id = p.id) AS latest_delivery_at
+              (SELECT MAX(d.sent_at) FROM poll_deliveries d
+                WHERE d.poll_id = p.id AND d.kind IN ('result', 'tie', 'cancelled', 'failure')) AS latest_delivery_at
          FROM polls p
         WHERE p.status IN ('resolved', 'cancelled', 'failed')
           AND p.ballots_purged_at IS NULL
@@ -628,10 +688,13 @@ export function listPollCleanupCandidateIds(db: PluginDatabase, input: {
             p.cleanup_next_review_at IS NULL
             OR julianday(p.cleanup_next_review_at) <= julianday(?)
           )
-          AND EXISTS (SELECT 1 FROM poll_deliveries d WHERE d.poll_id = p.id)
+          AND EXISTS (SELECT 1 FROM poll_deliveries d
+            WHERE d.poll_id = p.id AND d.kind IN ('result', 'tie', 'cancelled', 'failure'))
           AND NOT EXISTS (
             SELECT 1 FROM poll_deliveries d
-             WHERE d.poll_id = p.id AND d.status <> 'sent'
+             WHERE d.poll_id = p.id
+               AND d.kind IN ('result', 'tie', 'cancelled', 'failure')
+               AND d.status <> 'sent'
           )
           AND NOT EXISTS (
             SELECT 1 FROM poll_private_issuances ppi
@@ -680,15 +743,19 @@ export function getPollRetentionAnchor(db: PluginDatabase, pollIdInput: string):
   const row = db.get<{ retention_anchor: string }>(
     `WITH terminal_poll AS (
        SELECT COALESCE(p.resolved_at, p.cancelled_at, p.updated_at) AS terminal_at,
-              (SELECT MAX(d.sent_at) FROM poll_deliveries d WHERE d.poll_id = p.id) AS latest_delivery_at
+              (SELECT MAX(d.sent_at) FROM poll_deliveries d
+                WHERE d.poll_id = p.id AND d.kind IN ('result', 'tie', 'cancelled', 'failure')) AS latest_delivery_at
          FROM polls p
         WHERE p.id = ?
           AND p.status IN ('resolved', 'cancelled', 'failed')
           AND p.ballots_purged_at IS NULL
-          AND EXISTS (SELECT 1 FROM poll_deliveries d WHERE d.poll_id = p.id)
+          AND EXISTS (SELECT 1 FROM poll_deliveries d
+            WHERE d.poll_id = p.id AND d.kind IN ('result', 'tie', 'cancelled', 'failure'))
           AND NOT EXISTS (
             SELECT 1 FROM poll_deliveries d
-             WHERE d.poll_id = p.id AND d.status <> 'sent'
+             WHERE d.poll_id = p.id
+               AND d.kind IN ('result', 'tie', 'cancelled', 'failure')
+               AND d.status <> 'sent'
           )
           AND NOT EXISTS (
             SELECT 1 FROM poll_private_issuances ppi
@@ -718,15 +785,19 @@ export function purgePollBallotData(db: PluginDatabase, input: {
     const eligible = db.get(
       `WITH terminal_poll AS (
          SELECT COALESCE(p.resolved_at, p.cancelled_at, p.updated_at) AS terminal_at,
-                (SELECT MAX(d.sent_at) FROM poll_deliveries d WHERE d.poll_id = p.id) AS latest_delivery_at
+                (SELECT MAX(d.sent_at) FROM poll_deliveries d
+                  WHERE d.poll_id = p.id AND d.kind IN ('result', 'tie', 'cancelled', 'failure')) AS latest_delivery_at
            FROM polls p
           WHERE p.id = ?
             AND p.status IN ('resolved', 'cancelled', 'failed')
             AND p.ballots_purged_at IS NULL
-            AND EXISTS (SELECT 1 FROM poll_deliveries d WHERE d.poll_id = p.id)
+            AND EXISTS (SELECT 1 FROM poll_deliveries d
+              WHERE d.poll_id = p.id AND d.kind IN ('result', 'tie', 'cancelled', 'failure'))
             AND NOT EXISTS (
               SELECT 1 FROM poll_deliveries d
-               WHERE d.poll_id = p.id AND d.status <> 'sent'
+               WHERE d.poll_id = p.id
+                 AND d.kind IN ('result', 'tie', 'cancelled', 'failure')
+                 AND d.status <> 'sent'
             )
             AND NOT EXISTS (
               SELECT 1 FROM poll_private_issuances ppi
@@ -1956,15 +2027,21 @@ export function markPrivatePollRoundPublished(db: PluginDatabase, input: {
           Date.parse(round.publication_started_at)
             + poll.definition.closing.deadline.durationMinutes * 60_000
         ).toISOString()
-      : round.closes_at;
+      : poll.definition.closing.kind === 'deadline'
+        && poll.definition.closing.deadline.mode === 'after_first_non_creator_response'
+        ? null
+        : round.closes_at;
+    const activationDeadlineAt = firstResponseActivationDeadline(poll.definition, acceptedAt);
     const updated = db.run(
       `UPDATE poll_rounds
           SET status = 'open', published_at = ?, closes_at = ?, publication_outcome = 'accepted',
+              activation_deadline_at = ?, activation_not_before = NULL,
               publication_claim_token = NULL, publication_lease_expires_at = NULL,
               publication_next_attempt_at = NULL, updated_at = ?, last_error = NULL
         WHERE id = ? AND status = 'publishing' AND publication_claim_token = ?`,
       acceptedAt,
       closesAt,
+      activationDeadlineAt,
       acceptedAt,
       round.id,
       input.claimToken
@@ -2169,10 +2246,15 @@ export function markPollRoundPublished(db: PluginDatabase, input: {
           Date.parse(deadlineAnchorAt)
             + definition.closing.deadline.durationMinutes * 60_000
         ).toISOString()
-      : round.closes_at;
+      : definition.closing.kind === 'deadline'
+        && definition.closing.deadline.mode === 'after_first_non_creator_response'
+        ? null
+        : round.closes_at;
+    const activationDeadlineAt = firstResponseActivationDeadline(definition, acceptedAt);
     const result = db.run(
       `UPDATE poll_rounds
           SET status = 'open', poll_wa_message_id = ?, published_at = ?, closes_at = ?,
+              activation_deadline_at = ?, activation_not_before = NULL,
               publication_outcome = 'accepted',
               publication_claim_token = NULL, publication_lease_expires_at = NULL,
               publication_next_attempt_at = NULL, updated_at = ?, last_error = NULL
@@ -2181,6 +2263,7 @@ export function markPollRoundPublished(db: PluginDatabase, input: {
       required(input.pollWaMessageId, 'pollWaMessageId'),
       acceptedAt,
       closesAt,
+      activationDeadlineAt,
       acceptedAt,
       roundId,
       claimToken
@@ -2237,6 +2320,13 @@ export function listRecoverablePollRounds(db: PluginDatabase, input: {
             OR julianday(publication_next_attempt_at) <= julianday(?)))
         OR (status = 'publishing'
           AND julianday(publication_lease_expires_at) <= julianday(?))
+        OR (status = 'open' AND closes_at IS NULL AND activated_at IS NULL
+          AND activation_deadline_at IS NOT NULL
+          AND (
+            (activation_not_before IS NOT NULL
+              AND julianday(activation_not_before) <= julianday(?))
+            OR julianday(activation_deadline_at) <= julianday(?)
+          ))
         OR (status = 'open' AND closes_at IS NOT NULL
           AND julianday(closes_at) <= julianday(?)
           AND (finalization_next_attempt_at IS NULL
@@ -2251,11 +2341,15 @@ export function listRecoverablePollRounds(db: PluginDatabase, input: {
     now,
     now,
     now,
+    now,
+    now,
     limit
   );
   return rows.map((row) => ({
     kind: row.status === 'publish_pending' || row.status === 'publishing'
       ? 'publication'
+      : !row.closes_at && !row.activated_at
+        ? 'activation'
       : 'finalization',
     round: roundFromRow(row)
   }));
@@ -2393,8 +2487,215 @@ export function recordPollVoteEvent(db: PluginDatabase, input: {
       ballot.interactedAt,
       receivedAt
     );
+    if (selectedOptionIds.length > 0) {
+      registerFirstResponseTrigger(db, {
+        roundId: ballot.roundId,
+        voterIdentityId: ballot.voterIdentityId,
+        receivedAt
+      });
+    }
     return 'materialized';
   });
+}
+
+export type PollRoundActivationResult =
+  | { kind: 'not_applicable' | 'waiting' }
+  | {
+      kind: 'armed';
+      activatedAt: string;
+      closesAt: string;
+      triggerKind: 'participant_response' | 'creator_timeout';
+    }
+  | { kind: 'no_response'; closesAt: string };
+
+export function processPollRoundActivation(db: PluginDatabase, input: {
+  roundId: string;
+  now: string;
+}): PollRoundActivationResult {
+  const roundId = required(input.roundId, 'roundId');
+  const now = timestampSchema.parse(input.now);
+  return db.transaction(() => processPollRoundActivationInTransaction(db, roundId, now));
+}
+
+function processPollRoundActivationInTransaction(
+  db: PluginDatabase,
+  roundId: string,
+  now: string
+): PollRoundActivationResult {
+    const round = db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ?', roundId);
+    if (!round || round.status !== 'open' || round.closes_at || round.activated_at) {
+      return { kind: 'not_applicable' };
+    }
+    const pollRow = db.get<PollRow>('SELECT * FROM polls WHERE id = ?', round.poll_id);
+    if (!pollRow) {
+      return { kind: 'not_applicable' };
+    }
+    const poll = pollFromRow(pollRow);
+    const deadline = firstResponseClosing(poll.definition);
+    if (!deadline || !round.activation_deadline_at) {
+      return { kind: 'not_applicable' };
+    }
+    let triggerKind = round.activation_trigger_kind;
+    let triggerIdentityId = round.activation_trigger_identity_id;
+    if (!triggerKind && Date.parse(now) >= Date.parse(round.activation_deadline_at)) {
+      const creatorBallot = db.get<{ voter_identity_id: string }>(
+        `SELECT voter_identity_id FROM poll_ballots
+          WHERE round_id = ? AND voter_identity_id = ?
+            AND selected_option_ids_json <> '[]'
+          LIMIT 1`,
+        roundId,
+        poll.creatorIdentityId
+      );
+      if (creatorBallot) {
+        triggerKind = 'creator_timeout';
+        triggerIdentityId = creatorBallot.voter_identity_id;
+        const policy = roundAutomationPolicy(round);
+        const activationNotBefore = policy
+          ? pollAssistantPolicyNotBefore(
+              new Date(round.activation_deadline_at),
+              policy,
+              Boolean(round.working_hours_override_at)
+            ).toISOString()
+          : round.activation_deadline_at;
+        db.run(
+          `UPDATE poll_rounds
+              SET activation_trigger_kind = 'creator_timeout',
+                  activation_trigger_identity_id = ?, activation_not_before = ?, updated_at = ?
+            WHERE id = ? AND activation_trigger_kind IS NULL`,
+          triggerIdentityId,
+          activationNotBefore,
+          now,
+          roundId
+        );
+        round.activation_not_before = activationNotBefore;
+      } else {
+        const closesAt = round.activation_deadline_at;
+        const changed = db.run(
+          `UPDATE poll_rounds
+              SET closes_at = ?, activated_at = ?,
+                  activation_trigger_kind = 'no_response_timeout',
+                  activation_not_before = NULL, updated_at = ?
+            WHERE id = ? AND status = 'open' AND closes_at IS NULL AND activated_at IS NULL`,
+          closesAt,
+          closesAt,
+          now,
+          roundId
+        );
+        return changed.changes === 1
+          ? { kind: 'no_response', closesAt }
+          : { kind: 'not_applicable' };
+      }
+    }
+    if (triggerKind !== 'participant_response' && triggerKind !== 'creator_timeout') {
+      return { kind: 'waiting' };
+    }
+    const policy = roundAutomationPolicy(round);
+    const scheduledActivationAt = round.activation_not_before
+      ? new Date(round.activation_not_before)
+      : undefined;
+    const activationAt = scheduledActivationAt
+      ?? (policy
+        ? pollAssistantPolicyNotBefore(new Date(now), policy, Boolean(round.working_hours_override_at))
+        : new Date(now));
+    const cutoffAt = deadline.activationCutoffAt
+      ? Date.parse(deadline.activationCutoffAt)
+      : undefined;
+    if (cutoffAt !== undefined && activationAt.getTime() > cutoffAt) {
+      const cutoff = new Date(cutoffAt).toISOString();
+      db.run('DELETE FROM poll_ballots WHERE round_id = ?', roundId);
+      const changed = db.run(
+        `UPDATE poll_rounds
+            SET closes_at = ?, activated_at = ?,
+                activation_trigger_kind = 'no_response_timeout',
+                activation_trigger_identity_id = NULL,
+                activation_not_before = NULL, updated_at = ?
+          WHERE id = ? AND status = 'open' AND closes_at IS NULL AND activated_at IS NULL`,
+        cutoff,
+        cutoff,
+        now,
+        roundId
+      );
+      return changed.changes === 1
+        ? { kind: 'no_response', closesAt: cutoff }
+        : { kind: 'not_applicable' };
+    }
+    if (activationAt.getTime() > Date.parse(now)) {
+      db.run(
+        `UPDATE poll_rounds SET activation_not_before = ?, updated_at = ?
+          WHERE id = ? AND status = 'open' AND closes_at IS NULL`,
+        activationAt.toISOString(),
+        now,
+        roundId
+      );
+      return { kind: 'waiting' };
+    }
+    const closesAt = new Date(
+      activationAt.getTime() + deadline.durationMinutes * 60_000
+    ).toISOString();
+    const changed = db.run(
+      `UPDATE poll_rounds
+          SET closes_at = ?, activated_at = ?, activation_not_before = NULL, updated_at = ?
+        WHERE id = ? AND status = 'open' AND closes_at IS NULL AND activated_at IS NULL
+          AND activation_trigger_kind IN ('participant_response', 'creator_timeout')`,
+      closesAt,
+      activationAt.toISOString(),
+      now,
+      roundId
+    );
+    return changed.changes === 1
+      ? { kind: 'armed', activatedAt: activationAt.toISOString(), closesAt, triggerKind }
+      : { kind: 'not_applicable' };
+}
+
+function registerFirstResponseTrigger(db: PluginDatabase, input: {
+  roundId: string;
+  voterIdentityId: string;
+  receivedAt: string;
+}): void {
+  const round = db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ?', input.roundId);
+  if (
+    !round
+    || round.status !== 'open'
+    || round.closes_at
+    || round.activated_at
+    || round.activation_trigger_kind
+  ) {
+    return;
+  }
+  const pollRow = db.get<PollRow>('SELECT * FROM polls WHERE id = ?', round.poll_id);
+  if (!pollRow || pollRow.creator_identity_id === input.voterIdentityId) {
+    return;
+  }
+  const poll = pollFromRow(pollRow);
+  if (!firstResponseClosing(poll.definition)) {
+    return;
+  }
+  if (
+    round.activation_deadline_at
+    && Date.parse(input.receivedAt) > Date.parse(round.activation_deadline_at)
+  ) {
+    return;
+  }
+  const policy = roundAutomationPolicy(round);
+  const activationAt = policy
+    ? pollAssistantPolicyNotBefore(
+        new Date(input.receivedAt),
+        policy,
+        Boolean(round.working_hours_override_at)
+      )
+    : new Date(input.receivedAt);
+  db.run(
+    `UPDATE poll_rounds
+        SET activation_trigger_kind = 'participant_response',
+            activation_trigger_identity_id = ?, activation_not_before = ?, updated_at = ?
+      WHERE id = ? AND status = 'open' AND closes_at IS NULL
+        AND activated_at IS NULL AND activation_trigger_kind IS NULL`,
+    input.voterIdentityId,
+    activationAt.toISOString(),
+    input.receivedAt,
+    input.roundId
+  );
+  processPollRoundActivationInTransaction(db, input.roundId, input.receivedAt);
 }
 
 export function listPollBallots(db: PluginDatabase, roundId: string): PollBallot[] {
@@ -2650,6 +2951,64 @@ export function requestPollRoundClose(db: PluginDatabase, input: {
       roundId
     );
     return result.changes === 1;
+  });
+}
+
+export function overridePollWorkingHours(db: PluginDatabase, input: {
+  pollId: string;
+  roundId: string;
+  actorIdentityId: string;
+  overriddenAt: string;
+}): 'publication' | 'activation' | 'already_overridden' | 'unavailable' {
+  const pollId = required(input.pollId, 'pollId');
+  const roundId = required(input.roundId, 'roundId');
+  const actorIdentityId = required(input.actorIdentityId, 'actorIdentityId');
+  const overriddenAt = timestampSchema.parse(input.overriddenAt);
+  return db.transaction(() => {
+    const poll = db.get<PollRow>('SELECT * FROM polls WHERE id = ?', pollId);
+    const round = db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ? AND poll_id = ?', roundId, pollId);
+    if (!poll || !round || !poll.source_plugin_id || poll.status !== 'active') {
+      return 'unavailable';
+    }
+    if (round.working_hours_override_at || poll.working_hours_override_at) {
+      return 'already_overridden';
+    }
+    const publicationDeferred = round.status === 'publish_pending' && !round.poll_wa_message_id;
+    const activationDeferred = round.status === 'open'
+      && !round.closes_at
+      && !round.activated_at
+      && Boolean(firstResponseClosing(pollFromRow(poll).definition));
+    if (!publicationDeferred && !activationDeferred) {
+      return 'unavailable';
+    }
+    db.run(
+      `UPDATE polls
+          SET working_hours_override_at = ?, working_hours_override_by_identity_id = ?, updated_at = ?
+        WHERE id = ? AND status = 'active' AND working_hours_override_at IS NULL`,
+      overriddenAt,
+      actorIdentityId,
+      overriddenAt,
+      pollId
+    );
+    db.run(
+      `UPDATE poll_rounds
+          SET working_hours_override_at = ?,
+              publication_not_before = CASE WHEN status = 'publish_pending' THEN ? ELSE publication_not_before END,
+              publication_next_attempt_at = CASE WHEN status = 'publish_pending' THEN ? ELSE publication_next_attempt_at END,
+              activation_not_before = CASE
+                WHEN status = 'open' AND activation_trigger_kind IS NOT NULL THEN ?
+                ELSE activation_not_before
+              END,
+              updated_at = ?
+        WHERE id = ? AND working_hours_override_at IS NULL`,
+      overriddenAt,
+      overriddenAt,
+      overriddenAt,
+      overriddenAt,
+      overriddenAt,
+      roundId
+    );
+    return publicationDeferred ? 'publication' : 'activation';
   });
 }
 
@@ -3304,6 +3663,69 @@ export function getPollDelivery(db: PluginDatabase, deliveryId: string): StoredP
   return row ? deliveryFromRow(row) : undefined;
 }
 
+export function ensurePollLifecycleDelivery(db: PluginDatabase, input: {
+  pollId: string;
+  roundId: string;
+  delivery: PollDeliveryIntent;
+  createdAt: string;
+}): StoredPollDelivery {
+  const createdAt = timestampSchema.parse(input.createdAt);
+  validateDeliveryIntent(input.delivery);
+  return db.transaction(() => {
+    const existing = getPollDelivery(db, input.delivery.id);
+    if (existing) {
+      if (
+        existing.pollId !== input.pollId
+        || existing.roundId !== input.roundId
+        || existing.kind !== input.delivery.kind
+        || existing.deliveryKey !== input.delivery.deliveryKey
+        || existing.chatId !== input.delivery.chatId
+        || existing.text !== input.delivery.text
+        || existing.idempotencyKey !== input.delivery.idempotencyKey
+        || existing.deliveryBatchKey !== input.delivery.deliveryBatchKey
+        || existing.deliverySequence !== input.delivery.deliverySequence
+      ) {
+        throw new Error(`Poll delivery ${input.delivery.id} is bound to different content.`);
+      }
+      return existing;
+    }
+    insertDelivery(db, input.pollId, input.roundId, input.delivery, createdAt);
+    return getPollDelivery(db, input.delivery.id)!;
+  });
+}
+
+export function listPollRoundIdsMissingAnnouncements(
+  db: PluginDatabase,
+  limit = 100
+): Array<{ roundId: string; kind: 'publication' | 'activation' }> {
+  const normalized = normalizedLimit(limit);
+  return db.all<{ round_id: string; kind: 'publication' | 'activation' }>(
+    `SELECT round.id AS round_id, 'publication' AS kind
+       FROM poll_rounds round
+       JOIN polls poll ON poll.id = round.poll_id
+      WHERE round.published_at IS NOT NULL
+        AND round.announcements_required = 1
+        AND NOT EXISTS (
+          SELECT 1 FROM poll_deliveries delivery
+           WHERE delivery.id = 'poll-announcement:' || round.id || ':published'
+        )
+      UNION ALL
+     SELECT round.id AS round_id, 'activation' AS kind
+       FROM poll_rounds round
+       JOIN polls poll ON poll.id = round.poll_id
+      WHERE round.activated_at IS NOT NULL AND round.closes_at IS NOT NULL
+        AND round.announcements_required = 1
+        AND round.activation_trigger_kind IN ('participant_response', 'creator_timeout')
+        AND NOT EXISTS (
+          SELECT 1 FROM poll_deliveries delivery
+           WHERE delivery.id = 'poll-announcement:' || round.id || ':activated'
+        )
+      ORDER BY round_id ASC, kind ASC
+      LIMIT ?`,
+    normalized
+  ).map((row) => ({ roundId: row.round_id, kind: row.kind }));
+}
+
 export function getNextPendingPollDeliveryInBatch(
   db: PluginDatabase,
   deliveryBatchKey: string
@@ -3447,7 +3869,7 @@ function validateDeliveryIntent(delivery: PollDeliveryIntent): void {
       throw new Error('Delivery sequence must be a non-negative integer.');
     }
   }
-  if (!['result', 'tie', 'cancelled', 'failure'].includes(delivery.kind)) {
+  if (!['result', 'tie', 'cancelled', 'failure', 'announcement', 'activation'].includes(delivery.kind)) {
     throw new Error(`Invalid poll delivery kind ${delivery.kind}.`);
   }
 }
@@ -3487,6 +3909,21 @@ function pollFromRow(row: PollRow): StoredPoll {
             requestSha256: sha256Schema.parse(row.source_request_sha256)
           }
         }
+      : {}),
+    ...(row.automation_policy_json
+      ? {
+          automationPolicy: pollAssistantAutomationPolicySnapshotSchema.parse(parseJson(
+            row.automation_policy_json,
+            'poll automation policy'
+          ))
+        }
+      : {}),
+    bypassWorkingHours: row.bypass_working_hours === 1,
+    ...(row.working_hours_override_at
+      ? { workingHoursOverrideAt: row.working_hours_override_at }
+      : {}),
+    ...(row.working_hours_override_by_identity_id
+      ? { workingHoursOverrideByIdentityId: row.working_hours_override_by_identity_id }
       : {})
   };
 }
@@ -3503,6 +3940,20 @@ function roundFromRow(row: PollRoundRow): StoredPollRound {
     ...(row.poll_wa_message_id ? { pollWaMessageId: row.poll_wa_message_id } : {}),
     ...(row.closes_at ? { closesAt: row.closes_at } : {}),
     ...(row.published_at ? { publishedAt: row.published_at } : {}),
+    publicationNotBefore: row.publication_not_before ?? row.created_at,
+    ...(row.activation_deadline_at ? { activationDeadlineAt: row.activation_deadline_at } : {}),
+    ...(row.activation_not_before ? { activationNotBefore: row.activation_not_before } : {}),
+    ...(row.activated_at ? { activatedAt: row.activated_at } : {}),
+    ...(row.activation_trigger_kind ? { activationTriggerKind: row.activation_trigger_kind } : {}),
+    ...(row.activation_trigger_identity_id
+      ? { activationTriggerIdentityId: row.activation_trigger_identity_id }
+      : {}),
+    ...(row.automation_policy_json
+      ? { automationPolicy: roundAutomationPolicy(row)! }
+      : {}),
+    bypassWorkingHours: row.bypass_working_hours === 1,
+    ...(row.working_hours_override_at ? { workingHoursOverrideAt: row.working_hours_override_at } : {}),
+    announcementsRequired: row.announcements_required === 1,
     publicationAttempt: row.publication_attempt,
     ...(row.publication_claim_token ? { publicationClaimToken: row.publication_claim_token } : {}),
     ...(row.publication_lease_expires_at
@@ -3629,6 +4080,7 @@ function matchesCreateInput(existing: StoredPollAggregate, input: {
   roundId: string;
   publishIdempotencyKey: string;
   source?: CreatePollInput['source'];
+  automationPolicy?: PollAssistantAutomationPolicySnapshot | undefined;
   createdAt: string;
 }): boolean {
   const firstRound = existing.rounds.find((round) => round.roundNumber === 1);
@@ -3646,7 +4098,42 @@ function matchesCreateInput(existing: StoredPollAggregate, input: {
     && firstRound.id === input.roundId
     && firstRound.publishIdempotencyKey === input.publishIdempotencyKey
     && JSON.stringify(existing.poll.source) === JSON.stringify(input.source)
+    && JSON.stringify(existing.poll.automationPolicy) === JSON.stringify(input.automationPolicy)
     && firstRound.createdAt === input.createdAt;
+}
+
+function firstResponseClosing(definition: PollDefinition) {
+  return definition.closing.kind === 'deadline'
+    && definition.closing.deadline.mode === 'after_first_non_creator_response'
+    ? definition.closing.deadline
+    : undefined;
+}
+
+function firstResponseActivationDeadline(
+  definition: PollDefinition,
+  publishedAt: string
+): string | null {
+  const closing = firstResponseClosing(definition);
+  if (!closing) {
+    return null;
+  }
+  const timeoutAt = Date.parse(publishedAt) + closing.activationTimeoutMinutes * 60_000;
+  const cutoffAt = closing.activationCutoffAt ? Date.parse(closing.activationCutoffAt) : undefined;
+  return new Date(cutoffAt === undefined ? timeoutAt : Math.min(timeoutAt, cutoffAt)).toISOString();
+}
+
+function roundAutomationPolicy(row: PollRoundRow): PollAssistantAutomationPolicySnapshot | undefined {
+  if (!row.automation_policy_json) {
+    return undefined;
+  }
+  const policy = pollAssistantAutomationPolicySnapshotSchema.parse(parseJson(
+    row.automation_policy_json,
+    'poll round automation policy'
+  ));
+  if (policy.bypassWorkingHours !== (row.bypass_working_hours === 1)) {
+    throw new Error(`Stored poll round ${row.id} has conflicting working-hours policy state.`);
+  }
+  return policy;
 }
 
 function requireDistinct(values: readonly string[], label: string): void {

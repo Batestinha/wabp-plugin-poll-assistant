@@ -11,6 +11,7 @@ const POLL_COMMANDS = [
   '/poll create',
   '/poll list',
   '/poll status',
+  '/poll open',
   '/poll close',
   '/poll cancel',
   '/poll resolve'
@@ -49,6 +50,7 @@ function control(
 
 const CLOSING_MODE_OPTIONS = [
   { value: 'deadline', label: 'Deadline' },
+  { value: 'after_first_non_creator_response', label: 'After first response' },
   { value: 'manual', label: 'Manual close' }
 ];
 
@@ -95,6 +97,14 @@ export const pollAssistantControls: ControlDescriptor[] = [
     }
   ),
   control(
+    'automationWorkingHours',
+    'Automation working hours',
+    'Weekly local-time windows that gate automated poll publication and first-response activation. Overnight windows are supported; manual polls are unaffected.',
+    50,
+    { type: 'object' },
+    { widget: 'builder', builderId: 'official.poll-assistant.working-hours.v1' }
+  ),
+  control(
     'defaultClosingMode',
     'Default closing mode',
     'Closing choice shown first in the guided poll setup flow.',
@@ -117,6 +127,15 @@ export const pollAssistantControls: ControlDescriptor[] = [
     'Maximum duration',
     'Maximum number of minutes allowed between publication and a configured deadline.',
     120,
+    { type: 'number', unit: 'minutes', min: 1, max: 44_640 },
+    { widget: 'duration' },
+    'Poll defaults'
+  ),
+  control(
+    'defaultActivationTimeoutMinutes',
+    'Default activation timeout',
+    'Minutes after publication before a first-response poll promotes a creator ballot or finalizes with no response.',
+    130,
     { type: 'number', unit: 'minutes', min: 1, max: 44_640 },
     { widget: 'duration' },
     'Poll defaults'

@@ -2,10 +2,15 @@ import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runti
 import { cleanupPollBallots } from './delivery';
 import type { PollElector } from './domain';
 import { parsePollAssistantConfig } from './config';
+import {
+  ensurePollActivationAnnouncement,
+  ensurePollPublicationAnnouncement
+} from './announcements';
 import { deliverPollRandomDrawAudit } from './randomDrawAudit';
 import { deliverPollPrivatePublicationAudit } from './privatePublicationAudit';
 import {
   enqueuePollDeliveryJob,
+  enqueuePollActivateJob,
   enqueuePollFinalizeJob,
   enqueuePollPrivateIssueJob,
   enqueuePollPublishJob,
@@ -21,6 +26,7 @@ import {
   listPollCleanupCandidateIds,
   listPendingPollRandomDrawAudits,
   listPendingPollPrivatePublicationAuditIds,
+  listPollRoundIdsMissingAnnouncements,
   listRecoverablePollPrivateIssuanceIds,
   listRecoverablePollDeliveryIds,
   listRecoverablePollRounds,
@@ -42,6 +48,12 @@ export async function recoverPollAssistantJobs(
 ): Promise<number> {
   const db = pollsDatabase(context.databases);
   let enqueued = 0;
+  for (const missing of listPollRoundIdsMissingAnnouncements(db, 100)) {
+    const ensured = missing.kind === 'publication'
+      ? await ensurePollPublicationAnnouncement(context, missing.roundId, now)
+      : await ensurePollActivationAnnouncement(context, missing.roundId, now);
+    if (ensured) enqueued += 1;
+  }
   for (const recoverable of listRecoverablePollRounds(db, {
     now: now.toISOString(),
     limit: 100
@@ -58,6 +70,16 @@ export async function recoverPollAssistantJobs(
         ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
         groupWid: snapshot.poll.chatId,
         attempt: snapshot.round.publicationAttempt + 1,
+        runAt: now
+      });
+    } else if (recoverable.kind === 'activation') {
+      await enqueuePollActivateJob(context, {
+        scopeId: snapshot.poll.scopeId,
+        pollId: snapshot.poll.id,
+        roundId: snapshot.round.id,
+        ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
+        groupWid: snapshot.poll.chatId,
+        attempt: snapshot.round.finalizationAttempt + 1,
         runAt: now
       });
     } else {

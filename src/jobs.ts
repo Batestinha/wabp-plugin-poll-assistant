@@ -5,6 +5,7 @@ import { POLL_ASSISTANT_PLUGIN_ID } from './database';
 
 export const POLL_PUBLISH_JOB = 'poll.publish';
 export const POLL_FINALIZE_JOB = 'poll.finalize';
+export const POLL_ACTIVATE_JOB = 'poll.activate';
 export const POLL_DELIVER_JOB = 'poll.deliver';
 export const POLL_CLEANUP_JOB = 'poll.cleanup';
 export const POLL_PRIVATE_ISSUE_JOB = 'poll.private-issue';
@@ -79,6 +80,35 @@ export async function enqueuePollFinalizeJob(
     ...(input.runAt ? { runAt: input.runAt } : {}),
     dedupeKey: scheduledJobGenerationKey(
       POLL_FINALIZE_JOB,
+      input.roundId,
+      input.attempt,
+      input.runAt
+    )
+  });
+}
+
+export async function enqueuePollActivateJob(
+  context: Pick<PluginRuntimeContext, 'queue'>,
+  input: {
+    scopeId: string;
+    pollId: string;
+    roundId: string;
+    groupId?: string | undefined;
+    groupWid: string;
+    attempt: number;
+    runAt: Date;
+  }
+): Promise<void> {
+  await enqueuePluginJob(context.queue, {
+    pluginId: POLL_ASSISTANT_PLUGIN_ID,
+    jobName: POLL_ACTIVATE_JOB,
+    scopeId: input.scopeId,
+    ...(input.groupId ? { groupId: input.groupId } : {}),
+    groupWid: input.groupWid,
+    payload: { pollId: input.pollId, roundId: input.roundId },
+    runAt: input.runAt,
+    dedupeKey: scheduledJobGenerationKey(
+      POLL_ACTIVATE_JOB,
       input.roundId,
       input.attempt,
       input.runAt

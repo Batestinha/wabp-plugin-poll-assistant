@@ -4,6 +4,7 @@ import {
   pollElectorateDefinitionSchema,
   pollOptionTallySchema
 } from './domain';
+import { pollAssistantAutomationPolicySnapshotSchema } from './workingHours';
 
 export const POLL_ASSISTANT_AUTOMATION_SERVICE_ID = 'official.poll-assistant.automation.v1';
 export const POLL_ASSISTANT_ENSURE_POLL_METHOD = 'ensurePoll';
@@ -39,7 +40,8 @@ export const pollAssistantAutomationDefinitionSchema = pollDefinitionSchema.supe
 export const pollAssistantEnsurePollInputSchema = z.object({
   groupWid: groupWidSchema,
   sourceIdempotencyKey: stableIdSchema,
-  definition: pollAssistantAutomationDefinitionSchema
+  definition: pollAssistantAutomationDefinitionSchema,
+  bypassWorkingHours: z.boolean().default(false)
 }).strict();
 
 export const pollAssistantResolvePollInputSchema = z.object({
@@ -92,6 +94,12 @@ const automationPollBase = {
   ballotDelivery: z.enum(['group', 'private']),
   voterDisclosure: z.enum(['named', 'hidden']),
   electorate: pollElectorateDefinitionSchema,
+  publicationNotBefore: z.string().datetime({ offset: true }),
+  activationDeadlineAt: z.string().datetime({ offset: true }).nullable(),
+  activatedAt: z.string().datetime({ offset: true }).nullable(),
+  closesAt: z.string().datetime({ offset: true }).nullable(),
+  workingHoursPolicy: pollAssistantAutomationPolicySnapshotSchema,
+  workingHoursOverrideAt: z.string().datetime({ offset: true }).nullable(),
   options: z.array(automationPollOptionSchema).min(2).max(12)
 } as const;
 
@@ -155,7 +163,10 @@ export const pollAssistantCancelPollOutputSchema = z.object({
   cancelledAt: z.string().datetime({ offset: true })
 }).strict();
 
-export type PollAssistantEnsurePollInput = z.infer<typeof pollAssistantEnsurePollInputSchema>;
+export type PollAssistantEnsurePollInput = Omit<
+  z.infer<typeof pollAssistantEnsurePollInputSchema>,
+  'bypassWorkingHours'
+> & { bypassWorkingHours?: boolean | undefined };
 export type PollAssistantEnsurePollOutput = z.infer<typeof pollAssistantEnsurePollOutputSchema>;
 export type PollAssistantResolvePollInput = z.infer<typeof pollAssistantResolvePollInputSchema>;
 export type PollAssistantResolvePollOutput = z.infer<typeof pollAssistantResolvePollOutputSchema>;

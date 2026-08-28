@@ -11,6 +11,7 @@ import { cleanupPollBallots, deliverPollMessage } from './delivery';
 import { finalizePollRound } from './finalization';
 import {
   POLL_CLEANUP_JOB,
+  POLL_ACTIVATE_JOB,
   POLL_DELIVER_JOB,
   POLL_FINALIZE_JOB,
   POLL_PRIVATE_ISSUE_JOB,
@@ -35,6 +36,7 @@ import {
   pollsDatabase,
   recordPollVoteEvent
 } from './store';
+import { reconcilePollRoundTiming } from './timing';
 
 export interface PollAssistantHooksOptions {
   recoverJobs?: boolean | undefined;
@@ -192,6 +194,7 @@ export async function handlePollAssistantVote(
       ballot,
       receivedAt: event.receivedAt.toISOString()
     });
+    await reconcilePollRoundTiming(context, snapshot.round.id, event.receivedAt);
   } catch (error) {
     await context.audit.record({
       actorIdentityId: event.vote.voterIdentityId,
@@ -214,7 +217,11 @@ export async function handlePollAssistantJob(
   context: PluginRuntimeContext,
   event: PluginJobEvent
 ): Promise<void> {
-  if (event.jobName === POLL_PUBLISH_JOB || event.jobName === POLL_FINALIZE_JOB) {
+  if (
+    event.jobName === POLL_PUBLISH_JOB
+    || event.jobName === POLL_ACTIVATE_JOB
+    || event.jobName === POLL_FINALIZE_JOB
+  ) {
     const parsed = pollRoundJobPayloadSchema.safeParse(event.payload);
     if (!parsed.success) {
       await auditInvalidJob(context, event);
@@ -222,6 +229,8 @@ export async function handlePollAssistantJob(
     }
     if (event.jobName === POLL_PUBLISH_JOB) {
       await publishPollRound(context, parsed.data.pollId, parsed.data.roundId);
+    } else if (event.jobName === POLL_ACTIVATE_JOB) {
+      await reconcilePollRoundTiming(context, parsed.data.roundId);
     } else {
       await finalizePollRound(context, parsed.data.pollId, parsed.data.roundId);
     }

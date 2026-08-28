@@ -11,6 +11,7 @@ import {
 } from './commands';
 import {
   POLL_CLEANUP_JOB,
+  POLL_ACTIVATE_JOB,
   POLL_DELIVER_JOB,
   POLL_FINALIZE_JOB,
   POLL_PRIVATE_ISSUE_JOB,
@@ -38,6 +39,7 @@ export const pollAssistantManifest: PluginManifest = {
     '/poll create',
     '/poll list',
     '/poll status',
+    '/poll open',
     '/poll close',
     '/poll cancel',
     '/poll resolve'
@@ -90,13 +92,14 @@ export const pollAssistantManifest: PluginManifest = {
         titleKey: 'official.poll-assistant.help.close',
         summaryKey: 'official.poll-assistant.help.cancel',
         order: 30,
-        commands: ['/poll close', '/poll cancel', '/poll resolve'],
+        commands: ['/poll open', '/poll close', '/poll cancel', '/poll resolve'],
         exampleKeys: [
+          'official.poll-assistant.help.open.example',
           'official.poll-assistant.help.close.example',
           'official.poll-assistant.help.cancel.example',
           'official.poll-assistant.help.resolve.example'
         ],
-        keywords: ['poll', 'close', 'cancel', 'resolve', 'tie'],
+        keywords: ['poll', 'open', 'close', 'cancel', 'resolve', 'tie'],
         availability: {
           invocation: 'group_only',
           requiredAccessPlane: 'group_member',
@@ -130,6 +133,7 @@ export const pollAssistantManifest: PluginManifest = {
   dangerousActions: [],
   backgroundJobs: [
     POLL_PUBLISH_JOB,
+    POLL_ACTIVATE_JOB,
     POLL_FINALIZE_JOB,
     POLL_PRIVATE_ISSUE_JOB,
     POLL_DELIVER_JOB,
@@ -163,7 +167,7 @@ export const pollAssistantManifest: PluginManifest = {
   ],
   databases: [...pollAssistantDatabases],
   ownedData: [{ resource: POLL_HISTORY_OWNED_DATA_RESOURCE }],
-  dataVersion: '2',
+  dataVersion: '3',
   assistant: {
     summary: pollAssistantMessages['official.poll-assistant.assistant.summary']!,
     summaryKey: 'official.poll-assistant.assistant.summary',
@@ -184,7 +188,7 @@ export const pollAssistantManifest: PluginManifest = {
         intent: 'poll_manage',
         description: pollAssistantMessages['official.poll-assistant.assistant.workflow.manage']!,
         descriptionKey: 'official.poll-assistant.assistant.workflow.manage',
-        commands: ['/poll close', '/poll cancel', '/poll resolve']
+        commands: ['/poll open', '/poll close', '/poll cancel', '/poll resolve']
       }
     ]
   }

@@ -36,6 +36,11 @@ export type PollCreationPurpose = 'decide' | 'measure' | 'count';
 export type PollCreationClosingAnswer =
   | { kind: 'manual' }
   | { kind: 'after_publish_duration'; durationMinutes: number }
+  | {
+      kind: 'after_first_non_creator_response';
+      durationMinutes: number;
+      activationTimeoutMinutes: number;
+    }
   | { kind: 'deadline'; closesAt: string };
 export type PollCreationQuorumAnswer =
   | { kind: 'none' }
@@ -52,7 +57,12 @@ export interface PollCreationFlowPreferences {
   maxDeadlineMinutes: number;
   defaultClosing:
     | { kind: 'manual' }
-    | { kind: 'deadline'; durationMinutes: number };
+    | { kind: 'deadline'; durationMinutes: number }
+    | {
+        kind: 'after_first_non_creator_response';
+        durationMinutes: number;
+        activationTimeoutMinutes: number;
+      };
   defaultQuorum: PollCreationQuorumAnswer;
   preset?: PollCreationPreset | undefined;
 }
@@ -150,13 +160,22 @@ export function pollDefinitionFromCreationAnswers(input: {
           kind: 'deadline' as const,
           deadline: { mode: 'at' as const, closesAt: input.answers.closing.closesAt }
         }
-      : {
-          kind: 'deadline' as const,
-          deadline: {
-            mode: 'after_publish' as const,
-            durationMinutes: input.answers.closing.durationMinutes
+      : input.answers.closing.kind === 'after_first_non_creator_response'
+        ? {
+            kind: 'deadline' as const,
+            deadline: {
+              mode: 'after_first_non_creator_response' as const,
+              durationMinutes: input.answers.closing.durationMinutes,
+              activationTimeoutMinutes: input.answers.closing.activationTimeoutMinutes
+            }
           }
-        };
+        : {
+            kind: 'deadline' as const,
+            deadline: {
+              mode: 'after_publish' as const,
+              durationMinutes: input.answers.closing.durationMinutes
+            }
+          };
   const base = {
     schemaVersion: 1 as const,
     id: pollId,
@@ -478,6 +497,9 @@ export function pollCreationPresetInitialData(
       data[closingStepId(purpose)] = [preset.closing.kind];
       if (preset.closing.kind === 'duration') {
         data[durationStepId(purpose)] = preset.closing.durationMinutes;
+      } else if (preset.closing.kind === 'after_first_non_creator_response') {
+        data[firstResponseDurationStepId(purpose)] = preset.closing.durationMinutes;
+        data[activationTimeoutStepId(purpose)] = preset.closing.activationTimeoutMinutes ?? 120;
       }
     }
   }
@@ -574,6 +596,10 @@ function fixedCreationStepIds(preset: PollCreationPreset): Set<string> {
     if (preset.closing.mode === 'fixed') {
       ids.add(closingStepId(purpose));
       if (preset.closing.kind === 'duration') ids.add(durationStepId(purpose));
+      if (preset.closing.kind === 'after_first_non_creator_response') {
+        ids.add(firstResponseDurationStepId(purpose));
+        ids.add(activationTimeoutStepId(purpose));
+      }
     }
     if (preset.quorum.mode === 'fixed') {
       ids.add(quorumStepId(purpose));
@@ -664,15 +690,25 @@ function lifecycleSteps(
   const closingId = closingStepId(purpose);
   const durationId = durationStepId(purpose);
   const deadlineId = deadlineStepId(purpose);
+  const firstResponseDurationId = firstResponseDurationStepId(purpose);
+  const activationTimeoutId = activationTimeoutStepId(purpose);
   const quorumId = quorumStepId(purpose);
   const quorumAbsoluteId = quorumAbsoluteStepId(purpose);
   const quorumPercentageId = quorumPercentageStepId(purpose);
   const afterQuorum = purpose === 'decide' ? tiePolicyStepId() : BALLOT_DELIVERY_STEP_ID;
   const closingOptions = orderedByPreferred([
     { label: t('official.poll-assistant.flow.closing.duration'), value: 'duration' },
+    {
+      label: t('official.poll-assistant.flow.closing.afterFirstResponse'),
+      value: 'after_first_non_creator_response'
+    },
     { label: t('official.poll-assistant.flow.closing.deadline'), value: 'deadline' },
     { label: t('official.poll-assistant.flow.closing.manual'), value: 'manual' }
-  ], preferences.defaultClosing.kind === 'manual' ? 'manual' : 'duration');
+  ], preferences.defaultClosing.kind === 'manual'
+    ? 'manual'
+    : preferences.defaultClosing.kind === 'after_first_non_creator_response'
+      ? 'after_first_non_creator_response'
+      : 'duration');
   const quorumOptions = orderedByPreferred([
     { label: t('official.poll-assistant.flow.quorum.none'), value: 'none' },
     { label: t('official.poll-assistant.flow.quorum.absolute'), value: 'absolute' },
@@ -688,6 +724,7 @@ function lifecycleSteps(
       maxSelections: 1,
       nextStepIdByValue: {
         duration: durationId,
+        after_first_non_creator_response: firstResponseDurationId,
         deadline: deadlineId,
         manual: quorumId
       }
@@ -703,6 +740,40 @@ function lifecycleSteps(
       }),
       resolveInput: (resolution) => resolveInteger(resolution.input, 1, preferences.maxDeadlineMinutes,
         t('official.poll-assistant.flow.duration.invalid')),
+      nextStepId: quorumId
+    },
+    [firstResponseDurationId]: {
+      id: firstResponseDurationId,
+      kind: 'text',
+      prompt: t('official.poll-assistant.flow.firstResponseDuration', {
+        maximum: preferences.maxDeadlineMinutes,
+        defaultMinutes: preferences.defaultClosing.kind === 'after_first_non_creator_response'
+          ? preferences.defaultClosing.durationMinutes
+          : 60
+      }),
+      resolveInput: (resolution) => resolveInteger(
+        resolution.input,
+        1,
+        preferences.maxDeadlineMinutes,
+        t('official.poll-assistant.flow.duration.invalid')
+      ),
+      nextStepId: activationTimeoutId
+    },
+    [activationTimeoutId]: {
+      id: activationTimeoutId,
+      kind: 'text',
+      prompt: t('official.poll-assistant.flow.activationTimeout', {
+        maximum: preferences.maxDeadlineMinutes,
+        defaultMinutes: preferences.defaultClosing.kind === 'after_first_non_creator_response'
+          ? preferences.defaultClosing.activationTimeoutMinutes
+          : 120
+      }),
+      resolveInput: (resolution) => resolveInteger(
+        resolution.input,
+        1,
+        preferences.maxDeadlineMinutes,
+        t('official.poll-assistant.flow.activationTimeout.invalid')
+      ),
       nextStepId: quorumId
     },
     [deadlineId]: {
@@ -1043,6 +1114,13 @@ function closingAnswer(state: FlowState, purpose: PollCreationPurpose): PollCrea
     const durationMinutes = numberAnswer(state.data[durationStepId(purpose)]);
     return durationMinutes ? { kind: 'after_publish_duration', durationMinutes } : undefined;
   }
+  if (kind === 'after_first_non_creator_response') {
+    const durationMinutes = numberAnswer(state.data[firstResponseDurationStepId(purpose)]);
+    const activationTimeoutMinutes = numberAnswer(state.data[activationTimeoutStepId(purpose)]);
+    return durationMinutes && activationTimeoutMinutes
+      ? { kind, durationMinutes, activationTimeoutMinutes }
+      : undefined;
+  }
   if (kind === 'deadline') {
     const closesAt = stringAnswer(state.data[deadlineStepId(purpose)]);
     return closesAt ? { kind, closesAt } : undefined;
@@ -1141,6 +1219,11 @@ function closingSummary(closing: PollCreationClosingAnswer, t: TranslateFn): str
   }
   return closing.kind === 'deadline'
     ? t('official.poll-assistant.flow.summary.deadline', { deadline: closing.closesAt })
+    : closing.kind === 'after_first_non_creator_response'
+      ? t('official.poll-assistant.flow.summary.afterFirstResponse', {
+          minutes: closing.durationMinutes,
+          timeoutMinutes: closing.activationTimeoutMinutes
+        })
     : t('official.poll-assistant.flow.summary.duration', { minutes: closing.durationMinutes });
 }
 
@@ -1203,6 +1286,14 @@ function durationStepId(purpose: PollCreationPurpose): string {
 
 function deadlineStepId(purpose: PollCreationPurpose): string {
   return `${purpose}-deadline`;
+}
+
+function firstResponseDurationStepId(purpose: PollCreationPurpose): string {
+  return `${purpose}-first-response-duration`;
+}
+
+function activationTimeoutStepId(purpose: PollCreationPurpose): string {
+  return `${purpose}-activation-timeout`;
 }
 
 function quorumStepId(purpose: PollCreationPurpose): string {

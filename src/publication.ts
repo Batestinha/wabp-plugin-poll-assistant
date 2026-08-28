@@ -49,6 +49,7 @@ import {
   type PollPublicationClaim,
   type StoredPollRoundSnapshot
 } from './store';
+import { reconcilePollRoundTiming } from './timing';
 
 const PUBLICATION_FAILURE_MESSAGE_KEY = 'official.poll-assistant.failure.publication';
 
@@ -516,17 +517,7 @@ async function activatePrivatePollRound(
     slot += 1;
   }
   const published = getPollLifecycleByRoundId(db, claim.round.id);
-  if (published?.round.closesAt) {
-    await enqueuePollFinalizeJob(context, {
-      scopeId: claim.poll.scopeId,
-      pollId: claim.poll.id,
-      roundId: claim.round.id,
-      ...(claim.poll.groupId ? { groupId: claim.poll.groupId } : {}),
-      groupWid: claim.poll.chatId,
-      attempt: published.round.finalizationAttempt + 1,
-      runAt: new Date(published.round.closesAt)
-    });
-  }
+  if (published) await reconcilePollRoundTiming(context, claim.round.id, activatedAt);
 }
 
 function requirePrivateFanoutWindow(
@@ -596,18 +587,7 @@ async function persistAcceptedPublication(
     return;
   }
   const published = getPollLifecycleByRoundId(pollsDatabase(context.databases), claim.round.id);
-  if (!published?.round.closesAt) {
-    return;
-  }
-  await enqueuePollFinalizeJob(context, {
-    scopeId: published.poll.scopeId,
-    pollId: published.poll.id,
-    roundId: published.round.id,
-    ...(published.poll.groupId ? { groupId: published.poll.groupId } : {}),
-    groupWid: published.poll.chatId,
-    attempt: published.round.finalizationAttempt + 1,
-    runAt: new Date(published.round.closesAt)
-  });
+  if (published) await reconcilePollRoundTiming(context, claim.round.id, new Date(acceptedAt));
 }
 
 function conservativePublicationAnchor(publicationStartedAt: string, acceptedAt: string): string {
