@@ -1,5 +1,6 @@
 import type { StableIdentityAddressResolution } from '../../../platform/identity/identityAddressService';
-import { requireCompletePollVotes } from '../../../platform/transport/pollVoteReadback';
+import { requirePollVotesThroughCutoff } from '../../../platform/transport/pollVoteReadback';
+import { pollVoteRevisionIsLater } from '../../../platform/transport/pollVoteOrdering';
 import type { PollVoteReadback } from '../../../platform/transport/transportTypes';
 import { equivalentWhatsAppMessageIds } from '../../../platform/transport/messageIds';
 import type { PollReadbackBallot } from './domain';
@@ -16,10 +17,14 @@ export async function mapAuthoritativePollReadback(input: {
   electorateWidByIdentityId: ReadonlyMap<string, string>;
   resolveIdentityAddress(wid: string): Promise<StableIdentityAddressResolution>;
 }): Promise<PollReadbackBallot[]> {
-  const votes = requireCompletePollVotes(input.readback);
+  const votes = requirePollVotesThroughCutoff({
+    readback: input.readback,
+    expectedPollWaMsgId: input.target.pollWaMessageId,
+    cutoff: input.cutoffAt
+  });
   const ballotsByIdentity = new Map<string, {
     ballot: PollReadbackBallot;
-    sourceWaMessageId: string;
+    vote: PollVoteReadback['votes'][number];
   }>();
   for (const vote of votes) {
     validateReadbackVoteEnvelope(vote, input.target, input.cutoffAt);
@@ -37,25 +42,14 @@ export async function mapAuthoritativePollReadback(input: {
       voterWid: electorateWid
     };
     const ballot = mapResolvedPollVoteToReadbackBallot(projected, input.target, input.cutoffAt);
-    const sourceWaMessageId = requiredSourceMessageId(vote.sourceWaMsgId);
     const existing = ballotsByIdentity.get(ballot.voterIdentityId);
-    if (!existing || ballotIsNewer(ballot, sourceWaMessageId, existing)) {
-      ballotsByIdentity.set(ballot.voterIdentityId, { ballot, sourceWaMessageId });
+    if (!existing || pollVoteRevisionIsLater(vote, existing.vote)) {
+      ballotsByIdentity.set(ballot.voterIdentityId, { ballot, vote });
     }
   }
   return [...ballotsByIdentity.values()].map(({ ballot }) => ballot).sort((left, right) =>
     left.voterIdentityId.localeCompare(right.voterIdentityId)
   );
-}
-
-function ballotIsNewer(
-  candidate: PollReadbackBallot,
-  candidateSourceWaMessageId: string,
-  existing: { ballot: PollReadbackBallot; sourceWaMessageId: string }
-): boolean {
-  const difference = Date.parse(candidate.interactedAt) - Date.parse(existing.ballot.interactedAt);
-  return difference > 0
-    || (difference === 0 && candidateSourceWaMessageId > existing.sourceWaMessageId);
 }
 
 function requiredSourceMessageId(value: string | undefined): string {

@@ -190,11 +190,12 @@ export async function handlePollAssistantVote(
       },
       snapshot.round.closesAt ? new Date(snapshot.round.closesAt) : undefined
     );
+    const durableReceivedAt = event.vote.receivedAt ?? event.receivedAt;
     recordPollVoteEvent(db, {
       ballot,
-      receivedAt: event.receivedAt.toISOString()
+      receivedAt: durableReceivedAt.toISOString()
     });
-    await reconcilePollRoundTiming(context, snapshot.round.id, event.receivedAt);
+    await reconcilePollRoundTiming(context, snapshot.round.id, durableReceivedAt);
   } catch (error) {
     await context.audit.record({
       actorIdentityId: event.vote.voterIdentityId,

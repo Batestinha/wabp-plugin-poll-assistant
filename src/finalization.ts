@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
-import { equivalentWhatsAppMessageIds } from '../../../platform/transport/messageIds';
 import { mapAuthoritativePollReadback } from './authoritativeReadback';
 import type { PollBallotMappingTarget } from './ballotMapping';
 import type { PollReadbackBallot } from './domain';
@@ -304,15 +303,6 @@ function formatTimestamp(value: Date, timezone: string, locale: string): string 
   }).format(value);
 }
 
-function requireReadbackThroughCutoff(completeThrough: Date | undefined, cutoffAt: Date): void {
-  if (!completeThrough || Number.isNaN(completeThrough.getTime())) {
-    throw new Error('Authoritative poll readback has no trustworthy receipt watermark.');
-  }
-  if (completeThrough.getTime() < cutoffAt.getTime()) {
-    throw new Error('Authoritative poll readback receipt watermark has not reached the closing cutoff.');
-  }
-}
-
 function requireFinalizationSnapshot(
   db: ReturnType<typeof pollsDatabase>,
   claim: PollFinalizationClaim
@@ -367,10 +357,6 @@ async function readGroupPollBallots(
   const pollWaMessageId = snapshot.round.pollWaMessageId!;
   renewClaim();
   const readback = await context.pollVoteReadbackFor!(pollWaMessageId, { asOf: cutoffAt });
-  if (!equivalentWhatsAppMessageIds(readback.pollWaMsgId, pollWaMessageId)) {
-    throw new Error('Authoritative poll readback returned a different poll id.');
-  }
-  requireReadbackThroughCutoff(readback.completeThrough, cutoffAt);
   return mapAuthoritativePollReadback({
     readback,
     target: mappingTarget(snapshot, pollWaMessageId),
@@ -399,10 +385,6 @@ async function readPrivatePollBallots(
     const pollWaMessageId = issuance.pollWaMessageId!;
     renewClaim();
     const readback = await context.pollVoteReadbackFor!(pollWaMessageId, { asOf: cutoffAt });
-    if (!equivalentWhatsAppMessageIds(readback.pollWaMsgId, pollWaMessageId)) {
-      throw new Error('Authoritative private poll readback returned a different poll id.');
-    }
-    requireReadbackThroughCutoff(readback.completeThrough, cutoffAt);
     const mapped = await mapAuthoritativePollReadback({
       readback,
       target: mappingTarget(snapshot, pollWaMessageId),

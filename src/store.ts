@@ -7,6 +7,7 @@ import type {
 } from '../../../platform/pluginRuntime/runtime/pluginDatabase';
 import { numberPollOptions } from '../../../platform/transport/pollContract';
 import { equivalentWhatsAppMessageIds } from '../../../platform/transport/messageIds';
+import { comparePollVoteRevisions } from '../../../platform/transport/pollVoteOrdering';
 import { pollAssistantDatabase } from './database';
 import {
   pollAllowsMultipleAnswers,
@@ -2398,13 +2399,27 @@ export function recordPollVoteEvent(db: PluginDatabase, input: {
   const sourceWaMessageId = ballot.source.waMessageId;
   const receivedAt = timestampSchema.parse(input.receivedAt);
   return db.transaction(() => {
-    const duplicate = db.get(
-      `SELECT 1 FROM poll_vote_events
+    const duplicate = db.get<{
+      voter_identity_id: string;
+      selected_option_ids_json: string;
+      interacted_at: string;
+      received_at: string;
+    }>(
+      `SELECT voter_identity_id, selected_option_ids_json, interacted_at, received_at
+         FROM poll_vote_events
         WHERE round_id = ? AND source_wa_message_id = ?`,
       ballot.roundId,
       sourceWaMessageId
     );
-    if (duplicate) {
+    const duplicateOptionIds = duplicate
+      ? z.array(z.string()).parse(parseJson(duplicate.selected_option_ids_json, 'poll vote event selections'))
+      : [];
+    const sameSourceEnrichment = Boolean(
+      duplicate
+      && duplicate.voter_identity_id === ballot.voterIdentityId
+      && ballot.selectedOptionIds.length > duplicateOptionIds.length
+    );
+    if (duplicate && !sameSourceEnrichment) {
       return 'duplicate';
     }
     const round = db.get<{ poll_id: string; status: PollRoundStatus }>(
@@ -2442,29 +2457,58 @@ export function recordPollVoteEvent(db: PluginDatabase, input: {
     const selectedOptionIds = [...ballot.selectedOptionIds].sort(
       (left, right) => ordinalByOptionId.get(left)! - ordinalByOptionId.get(right)!
     );
-    db.run(
-      `INSERT INTO poll_vote_events (
-         round_id, source_wa_message_id, voter_identity_id, voter_wid,
-         selected_option_ids_json, interacted_at, received_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ballot.roundId,
-      sourceWaMessageId,
-      ballot.voterIdentityId,
-      ballot.voterWid,
-      JSON.stringify(selectedOptionIds),
-      ballot.interactedAt,
-      receivedAt
-    );
+    const canonicalInteractedAt = duplicate?.interacted_at ?? ballot.interactedAt;
+    const canonicalReceivedAt = duplicate?.received_at ?? receivedAt;
+    if (duplicate) {
+      db.run(
+        `UPDATE poll_vote_events
+            SET voter_wid = ?, selected_option_ids_json = ?
+          WHERE round_id = ? AND source_wa_message_id = ?`,
+        ballot.voterWid,
+        JSON.stringify(selectedOptionIds),
+        ballot.roundId,
+        sourceWaMessageId
+      );
+    } else {
+      db.run(
+        `INSERT INTO poll_vote_events (
+           round_id, source_wa_message_id, voter_identity_id, voter_wid,
+           selected_option_ids_json, interacted_at, received_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ballot.roundId,
+        sourceWaMessageId,
+        ballot.voterIdentityId,
+        ballot.voterWid,
+        JSON.stringify(selectedOptionIds),
+        canonicalInteractedAt,
+        canonicalReceivedAt
+      );
+    }
     if (round.status === 'finalizing') {
       return 'audit_only';
     }
-    const existing = db.get<{ interacted_at: string; source_id: string }>(
-      `SELECT interacted_at, source_id FROM poll_ballots
-        WHERE round_id = ? AND voter_identity_id = ?`,
+    const existing = db.get<{
+      interacted_at: string;
+      source_kind: BallotRow['source_kind'];
+      source_id: string;
+      received_at: string | null;
+    }>(
+      `SELECT ballot.interacted_at, ballot.source_kind, ballot.source_id,
+              vote.received_at
+         FROM poll_ballots AS ballot
+         LEFT JOIN poll_vote_events AS vote
+           ON vote.round_id = ballot.round_id
+          AND ballot.source_kind = 'transport_event'
+          AND vote.source_wa_message_id = ballot.source_id
+        WHERE ballot.round_id = ? AND ballot.voter_identity_id = ?`,
       ballot.roundId,
       ballot.voterIdentityId
     );
-    if (existing && !isVoteNewer(ballot, existing)) {
+    if (
+      existing
+      && !(sameSourceEnrichment && existing.source_kind === 'transport_event' && existing.source_id === sourceWaMessageId)
+      && !isVoteNewer(ballot, canonicalReceivedAt, existing)
+    ) {
       return 'stale';
     }
     db.run(
@@ -2484,14 +2528,14 @@ export function recordPollVoteEvent(db: PluginDatabase, input: {
       ballot.voterWid,
       JSON.stringify(selectedOptionIds),
       sourceWaMessageId,
-      ballot.interactedAt,
-      receivedAt
+      canonicalInteractedAt,
+      canonicalReceivedAt
     );
     if (selectedOptionIds.length > 0) {
       registerFirstResponseTrigger(db, {
         roundId: ballot.roundId,
         voterIdentityId: ballot.voterIdentityId,
-        receivedAt
+        receivedAt: canonicalReceivedAt
       });
     }
     return 'materialized';
@@ -4043,14 +4087,25 @@ function privateIssuanceFromRow(row: PrivateIssuanceRow): StoredPollPrivateIssua
 
 function isVoteNewer(
   ballot: PollBallot,
-  existing: { interacted_at: string; source_id: string }
+  receivedAt: string,
+  existing: {
+    interacted_at: string;
+    source_id: string;
+    received_at: string | null;
+  }
 ): boolean {
   if (ballot.source.kind !== 'transport_event') {
     return false;
   }
-  const timestampDifference = Date.parse(ballot.interactedAt) - Date.parse(existing.interacted_at);
-  return timestampDifference > 0
-    || (timestampDifference === 0 && ballot.source.waMessageId > existing.source_id);
+  return comparePollVoteRevisions({
+    interactedAt: new Date(ballot.interactedAt),
+    receivedAt: new Date(receivedAt),
+    sourceWaMsgId: ballot.source.waMessageId
+  }, {
+    interactedAt: new Date(existing.interacted_at),
+    ...(existing.received_at ? { receivedAt: new Date(existing.received_at) } : {}),
+    sourceWaMsgId: existing.source_id
+  }) > 0;
 }
 
 function required(value: string, field: string): string {
