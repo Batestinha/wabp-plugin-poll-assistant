@@ -25,11 +25,18 @@ import {
   POLL_ASSISTANT_RESOLVE_POLL_METHOD
 } from './serviceApi';
 import { pollAssistantMessages } from './messages';
+import {
+  POLL_ASSISTANT_LIFECYCLE_CANCEL_METHOD,
+  POLL_ASSISTANT_LIFECYCLE_ENSURE_METHOD,
+  POLL_ASSISTANT_LIFECYCLE_FINALIZE_METHOD,
+  POLL_ASSISTANT_LIFECYCLE_INSPECT_METHOD,
+  POLL_ASSISTANT_LIFECYCLE_SERVICE_ID
+} from './lifecycleServiceApi';
 
 export const pollAssistantManifest: PluginManifest = {
   pluginId: POLL_ASSISTANT_PLUGIN_ID,
   kind: 'managed_group',
-  version: '0.2.0',
+  version: '0.3.0',
   coreApiRange: '>=0.2.0',
   messageNamespace: 'official.poll-assistant',
   descriptionKey: 'official.poll-assistant.description',
@@ -110,20 +117,36 @@ export const pollAssistantManifest: PluginManifest = {
     ]
   },
   eventSubscriptions: ['poll.vote', 'participant.change', 'plugin.job'],
-  services: [{
-    serviceId: POLL_ASSISTANT_AUTOMATION_SERVICE_ID,
-    description: 'Idempotent source-owned automated decision poll lifecycles.',
-    methods: [
-      { name: POLL_ASSISTANT_ENSURE_POLL_METHOD, access: 'mutation' },
-      {
-        name: POLL_ASSISTANT_RESOLVE_POLL_METHOD,
-        access: 'read',
-        availability: 'installed'
-      },
-      { name: POLL_ASSISTANT_RESOLVE_OUTCOME_METHOD, access: 'mutation' },
-      { name: POLL_ASSISTANT_CANCEL_POLL_METHOD, access: 'mutation' }
-    ]
-  }],
+  services: [
+    {
+      serviceId: POLL_ASSISTANT_AUTOMATION_SERVICE_ID,
+      description: 'Idempotent source-owned automated decision poll lifecycles.',
+      methods: [
+        { name: POLL_ASSISTANT_ENSURE_POLL_METHOD, access: 'mutation' },
+        {
+          name: POLL_ASSISTANT_RESOLVE_POLL_METHOD,
+          access: 'read',
+          availability: 'installed'
+        },
+        { name: POLL_ASSISTANT_RESOLVE_OUTCOME_METHOD, access: 'mutation' },
+        { name: POLL_ASSISTANT_CANCEL_POLL_METHOD, access: 'mutation' }
+      ]
+    },
+    {
+      serviceId: POLL_ASSISTANT_LIFECYCLE_SERVICE_ID,
+      description: 'Idempotent source-owned named survey lifecycles and immutable ballot snapshots.',
+      methods: [
+        { name: POLL_ASSISTANT_LIFECYCLE_ENSURE_METHOD, access: 'mutation' },
+        {
+          name: POLL_ASSISTANT_LIFECYCLE_INSPECT_METHOD,
+          access: 'read',
+          availability: 'installed'
+        },
+        { name: POLL_ASSISTANT_LIFECYCLE_FINALIZE_METHOD, access: 'mutation' },
+        { name: POLL_ASSISTANT_LIFECYCLE_CANCEL_METHOD, access: 'mutation' }
+      ]
+    }
+  ],
   requiredPermissions: [
     POLL_ASSISTANT_COMMAND_PERMISSIONS.create,
     POLL_ASSISTANT_COMMAND_PERMISSIONS.manage
@@ -167,7 +190,7 @@ export const pollAssistantManifest: PluginManifest = {
   ],
   databases: [...pollAssistantDatabases],
   ownedData: [{ resource: POLL_HISTORY_OWNED_DATA_RESOURCE }],
-  dataVersion: '3',
+  dataVersion: '4',
   assistant: {
     summary: pollAssistantMessages['official.poll-assistant.assistant.summary']!,
     summaryKey: 'official.poll-assistant.assistant.summary',

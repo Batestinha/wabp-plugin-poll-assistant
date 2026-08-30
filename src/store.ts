@@ -28,6 +28,10 @@ import {
   pollAssistantPolicyNotBefore,
   type PollAssistantAutomationPolicySnapshot
 } from './workingHours';
+import {
+  pollAssistantLifecycleSnapshotSchema,
+  type PollAssistantLifecycleSnapshot
+} from './lifecycleServiceApi';
 
 const timestampSchema = z.string().datetime({ offset: true });
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
@@ -44,6 +48,8 @@ export type PollRoundStatus =
   | 'failed';
 export type PollPublicationOutcome = 'not_attempted' | 'unknown' | 'accepted';
 export type PollDeliveryStatus = 'pending' | 'sending' | 'sent' | 'uncertain';
+export type PollSourceLifecycleKind = 'none' | 'automation' | 'survey';
+export type PollPresentationOwner = 'poll_assistant' | 'source_plugin';
 export type PollDeliveryKind =
   | 'result'
   | 'tie'
@@ -87,6 +93,9 @@ export interface CreatePollInput {
     idempotencyKey: string;
     requestSha256: string;
   } | undefined;
+  sourceLifecycleKind?: PollSourceLifecycleKind | undefined;
+  presentationOwner?: PollPresentationOwner | undefined;
+  exactOptionLabels?: boolean | undefined;
   automationPolicy?: PollAssistantAutomationPolicySnapshot | undefined;
   maxActivePollsPerChat: number;
   createdAt: string;
@@ -155,6 +164,8 @@ export interface StoredPoll {
     idempotencyKey: string;
     requestSha256: string;
   } | undefined;
+  sourceLifecycleKind: PollSourceLifecycleKind;
+  presentationOwner: PollPresentationOwner;
   automationPolicy?: PollAssistantAutomationPolicySnapshot | undefined;
   bypassWorkingHours: boolean;
   workingHoursOverrideAt?: string | undefined;
@@ -165,6 +176,18 @@ export interface StoredPollAggregate {
   poll: StoredPoll;
   rounds: StoredPollRound[];
   electorate: PollElector[];
+}
+
+export interface StoredPollLifecycleSnapshot {
+  snapshot: PollAssistantLifecycleSnapshot;
+  snapshotSha256: string;
+  createdAt: string;
+}
+
+export interface StoredPollLifecycleAction {
+  idempotencyKey: string;
+  requestSha256: string;
+  requestedAt: string;
 }
 
 export interface PollFinalizationClaim {
@@ -286,12 +309,13 @@ interface PollRow extends PluginDatabaseRow {
   source_plugin_id: string | null;
   source_idempotency_key: string | null;
   source_request_sha256: string | null;
+  source_lifecycle_kind: PollSourceLifecycleKind;
+  presentation_owner: PollPresentationOwner;
   rolling_membership_observed_at: string | null;
   rolling_membership_next_review_at: string | null;
   automation_policy_json: string | null;
   bypass_working_hours: number;
   working_hours_override_at: string | null;
-  announcements_required: number;
   working_hours_override_by_identity_id: string | null;
 }
 
@@ -420,6 +444,20 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
     idempotencyKey: required(input.source.idempotencyKey, 'source.idempotencyKey'),
     requestSha256: sha256Schema.parse(input.source.requestSha256)
   } : undefined;
+  const sourceLifecycleKind = input.sourceLifecycleKind ?? (source ? 'automation' : 'none');
+  const presentationOwner = input.presentationOwner ?? 'poll_assistant';
+  if (!['none', 'automation', 'survey'].includes(sourceLifecycleKind)) {
+    throw new Error('sourceLifecycleKind is invalid.');
+  }
+  if (!['poll_assistant', 'source_plugin'].includes(presentationOwner)) {
+    throw new Error('presentationOwner is invalid.');
+  }
+  if ((sourceLifecycleKind === 'none') !== !source) {
+    throw new Error('Source lifecycle kind must identify whether a source plugin owns the poll.');
+  }
+  if (presentationOwner === 'source_plugin' && sourceLifecycleKind !== 'survey') {
+    throw new Error('Only source survey lifecycles may own poll presentation.');
+  }
   const automationPolicy = input.automationPolicy
     ? pollAssistantAutomationPolicySnapshotSchema.parse(input.automationPolicy)
     : undefined;
@@ -430,7 +468,13 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
     throw new Error('maxActivePollsPerChat must be a positive integer.');
   }
   const orderedOptions = [...definition.options].sort((left, right) => left.ordinal - right.ordinal);
-  const wireLabels = numberPollOptions(orderedOptions.map((option) => option.label));
+  const exactOptionLabels = input.exactOptionLabels ?? sourceLifecycleKind === 'survey';
+  if (exactOptionLabels !== (sourceLifecycleKind === 'survey')) {
+    throw new Error('Only source survey lifecycles may publish exact option labels.');
+  }
+  const wireLabels = exactOptionLabels
+    ? orderedOptions.map((option) => option.label)
+    : numberPollOptions(orderedOptions.map((option) => option.label));
 
   return db.transaction(() => {
     const existing = getPollAggregate(db, definition.id);
@@ -446,6 +490,8 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
         roundId,
         publishIdempotencyKey,
         source,
+        sourceLifecycleKind,
+        presentationOwner,
         automationPolicy,
         createdAt
       })) {
@@ -466,8 +512,9 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
          id, scope_id, chat_id, group_id, creator_identity_id, creator_wid, creator_label,
          purpose, definition_json, status, created_at, updated_at,
          source_plugin_id, source_idempotency_key, source_request_sha256,
+         source_lifecycle_kind, presentation_owner,
          automation_policy_json, bypass_working_hours
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       definition.id,
       scopeId,
       chatId,
@@ -482,6 +529,8 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
       source?.pluginId ?? null,
       source?.idempotencyKey ?? null,
       source?.requestSha256 ?? null,
+      sourceLifecycleKind,
+      presentationOwner,
       automationPolicy ? JSON.stringify(automationPolicy) : null,
       automationPolicy?.bypassWorkingHours ? 1 : automationPolicy ? 0 : 1
     );
@@ -494,7 +543,7 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
          publish_idempotency_key, closes_at, automation_policy_json,
          bypass_working_hours, publication_not_before, publication_next_attempt_at,
          announcements_required, created_at, updated_at
-       ) VALUES (?, ?, 1, 'publish_pending', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+       ) VALUES (?, ?, 1, 'publish_pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       roundId,
       definition.id,
       definition.question,
@@ -507,6 +556,7 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
       automationPolicy?.bypassWorkingHours ? 1 : automationPolicy ? 0 : 1,
       publicationNotBefore,
       publicationNotBefore,
+      presentationOwner === 'poll_assistant' ? 1 : 0,
       createdAt,
       createdAt
     );
@@ -613,13 +663,13 @@ export function cancelPoll(db: PluginDatabase, input: {
   cancelledByIdentityId: string;
   cancelledByWid: string;
   reason?: string | undefined;
-  delivery: PollDeliveryIntent;
+  delivery?: PollDeliveryIntent | undefined;
   cancelledAt: string;
 }): boolean {
   const pollId = required(input.pollId, 'pollId');
   const cancelledAt = timestampSchema.parse(input.cancelledAt);
-  validateDeliveryIntent(input.delivery);
-  if (input.delivery.kind !== 'cancelled') {
+  if (input.delivery) validateDeliveryIntent(input.delivery);
+  if (input.delivery && input.delivery.kind !== 'cancelled') {
     throw new Error('Poll cancellation requires a cancelled delivery.');
   }
   return db.transaction(() => {
@@ -630,6 +680,11 @@ export function cancelPoll(db: PluginDatabase, input: {
     if (!round) {
       return false;
     }
+    const poll = db.get<PollRow>('SELECT * FROM polls WHERE id = ?', pollId);
+    if (!poll) {
+      return false;
+    }
+    requirePresentationDelivery(pollFromRow(poll), input.delivery, 'cancellation');
     if (round.status === 'publishing' || round.status === 'finalizing') {
       return false;
     }
@@ -666,7 +721,7 @@ export function cancelPoll(db: PluginDatabase, input: {
       cancelledAt,
       pollId
     );
-    insertDelivery(db, pollId, round.id, input.delivery, cancelledAt);
+    if (input.delivery) insertDelivery(db, pollId, round.id, input.delivery, cancelledAt);
     return true;
   });
 }
@@ -2171,14 +2226,14 @@ export function failPollRoundPublication(db: PluginDatabase, input: {
   roundId: string;
   claimToken: string;
   error: string;
-  delivery: PollDeliveryIntent;
+  delivery?: PollDeliveryIntent | undefined;
   failedAt: string;
 }): boolean {
   const roundId = required(input.roundId, 'roundId');
   const claimToken = required(input.claimToken, 'claimToken');
   const failedAt = timestampSchema.parse(input.failedAt);
-  validateDeliveryIntent(input.delivery);
-  if (input.delivery.kind !== 'failure') {
+  if (input.delivery) validateDeliveryIntent(input.delivery);
+  if (input.delivery && input.delivery.kind !== 'failure') {
     throw new Error('Terminal publication failure requires a failure delivery.');
   }
   return db.transaction(() => {
@@ -2190,6 +2245,11 @@ export function failPollRoundPublication(db: PluginDatabase, input: {
     ) {
       return false;
     }
+    const poll = db.get<PollRow>('SELECT * FROM polls WHERE id = ?', round.poll_id);
+    if (!poll) {
+      return false;
+    }
+    requirePresentationDelivery(pollFromRow(poll), input.delivery, 'publication failure');
     const error = required(input.error, 'error');
     db.run(
       `UPDATE poll_rounds
@@ -2208,7 +2268,7 @@ export function failPollRoundPublication(db: PluginDatabase, input: {
       error,
       round.poll_id
     );
-    insertDelivery(db, round.poll_id, roundId, input.delivery, failedAt);
+    if (input.delivery) insertDelivery(db, round.poll_id, roundId, input.delivery, failedAt);
     return true;
   });
 }
@@ -3091,8 +3151,9 @@ export function completePollRoundFinalization(db: PluginDatabase, input: {
   result: PollResult;
   inputSha256: string;
   readbackSource: 'events' | 'transport_readback';
-  delivery: PollDeliveryIntent;
+  delivery?: PollDeliveryIntent | undefined;
   additionalDeliveries?: readonly PollDeliveryIntent[] | undefined;
+  lifecycleSnapshot?: PollAssistantLifecycleSnapshot | undefined;
   completedAt: string;
 }): CompletePollRoundResult {
   const resultDocument = pollResultSchema.parse(input.result);
@@ -3100,18 +3161,24 @@ export function completePollRoundFinalization(db: PluginDatabase, input: {
   const claimToken = required(input.claimToken, 'claimToken');
   const inputSha256 = sha256Schema.parse(input.inputSha256);
   const completedAt = timestampSchema.parse(input.completedAt);
-  validateDeliveryIntent(input.delivery);
-  const deliveries = [input.delivery, ...(input.additionalDeliveries ?? [])];
+  if (input.delivery) validateDeliveryIntent(input.delivery);
+  const deliveries = [
+    ...(input.delivery ? [input.delivery] : []),
+    ...(input.additionalDeliveries ?? [])
+  ];
   deliveries.forEach(validateDeliveryIntent);
   requireDistinct(deliveries.map((delivery) => delivery.id), 'Poll delivery ids');
   requireDistinct(deliveries.map((delivery) => delivery.deliveryKey), 'Poll delivery keys');
   requireDistinct(deliveries.map((delivery) => delivery.idempotencyKey), 'Poll delivery idempotency keys');
-  if (deliveries.slice(1).some((delivery) =>
-    delivery.kind !== 'result' || delivery.chatId !== input.delivery.chatId)) {
+  if (!input.delivery && deliveries.length > 0) {
+    throw new Error('Additional result pages require a primary delivery.');
+  }
+  if (input.delivery && deliveries.slice(1).some((delivery) =>
+    delivery.kind !== 'result' || delivery.chatId !== input.delivery!.chatId)) {
     throw new Error('Additional result pages must target the primary result chat.');
   }
   if (deliveries.length > 1) {
-    const batchKey = input.delivery.deliveryBatchKey;
+    const batchKey = input.delivery!.deliveryBatchKey;
     if (!batchKey || deliveries.some((delivery, index) =>
       delivery.deliveryBatchKey !== batchKey || delivery.deliverySequence !== index)) {
       throw new Error('Paginated result deliveries require one contiguous ordered batch.');
@@ -3122,10 +3189,28 @@ export function completePollRoundFinalization(db: PluginDatabase, input: {
   }
   const tiePending = resultDocument.purpose === 'decide'
     && resultDocument.outcome.status === 'tie';
-  if ((input.delivery.kind === 'tie') !== tiePending) {
+  if (input.delivery && (input.delivery.kind === 'tie') !== tiePending) {
     throw new Error('Tie results require a tie delivery; non-tie results require another delivery kind.');
   }
   return db.transaction(() => {
+    const roundForPolicy = db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ?', roundId);
+    const pollForPolicy = roundForPolicy
+      ? db.get<PollRow>('SELECT * FROM polls WHERE id = ?', roundForPolicy.poll_id)
+      : undefined;
+    if (!roundForPolicy || !pollForPolicy) {
+      return 'claim_lost';
+    }
+    const storedPoll = pollFromRow(pollForPolicy);
+    requirePresentationDelivery(storedPoll, input.delivery, 'final result');
+    const lifecycleSnapshot = input.lifecycleSnapshot
+      ? pollAssistantLifecycleSnapshotSchema.parse(input.lifecycleSnapshot)
+      : undefined;
+    if ((storedPoll.sourceLifecycleKind === 'survey') !== Boolean(lifecycleSnapshot)) {
+      throw new Error('Source survey finalization requires exactly one immutable lifecycle snapshot.');
+    }
+    if (lifecycleSnapshot) {
+      assertLifecycleSnapshotMatchesPoll(lifecycleSnapshot, storedPoll, roundForPolicy, completedAt);
+    }
     const existing = db.get<{ result_json: string; input_sha256: string }>(
       'SELECT result_json, input_sha256 FROM poll_results WHERE round_id = ?',
       roundId
@@ -3137,6 +3222,9 @@ export function completePollRoundFinalization(db: PluginDatabase, input: {
       ))) === JSON.stringify(resultDocument);
       if (!sameResult || existing.input_sha256 !== inputSha256) {
         throw new Error(`Poll round ${roundId} already has a different immutable result.`);
+      }
+      if (lifecycleSnapshot) {
+        ensurePollLifecycleSnapshot(db, lifecycleSnapshot, completedAt);
       }
       ensurePollRandomDrawAuditIntent(db, roundId, resultDocument, completedAt);
       return 'already_completed';
@@ -3167,6 +3255,9 @@ export function completePollRoundFinalization(db: PluginDatabase, input: {
       completedAt
     );
     ensurePollRandomDrawAuditIntent(db, roundId, resultDocument, completedAt);
+    if (lifecycleSnapshot) {
+      ensurePollLifecycleSnapshot(db, lifecycleSnapshot, completedAt);
+    }
     db.run(
       `UPDATE poll_rounds
           SET status = ?, finalized_at = ?, finalization_claim_token = NULL,
@@ -3195,6 +3286,86 @@ export function completePollRoundFinalization(db: PluginDatabase, input: {
       completedAt
     ));
     return 'completed';
+  });
+}
+
+export function getPollLifecycleSnapshot(
+  db: PluginDatabase,
+  roundId: string
+): StoredPollLifecycleSnapshot | undefined {
+  const row = db.get<{
+    snapshot_json: string;
+    snapshot_sha256: string;
+    created_at: string;
+  }>(
+    'SELECT snapshot_json, snapshot_sha256, created_at FROM poll_lifecycle_snapshots WHERE round_id = ?',
+    required(roundId, 'roundId')
+  );
+  if (!row) return undefined;
+  const snapshot = pollAssistantLifecycleSnapshotSchema.parse(parseJson(
+    row.snapshot_json,
+    'poll lifecycle snapshot'
+  ));
+  const snapshotSha256 = createHash('sha256').update(JSON.stringify(snapshot)).digest('hex');
+  if (snapshotSha256 !== row.snapshot_sha256) {
+    throw new Error(`Stored lifecycle snapshot for ${roundId} failed its immutable digest check.`);
+  }
+  return { snapshot, snapshotSha256, createdAt: row.created_at };
+}
+
+export function getPollLifecycleAction(db: PluginDatabase, input: {
+  pollId: string;
+  kind: 'finalize' | 'cancel';
+}): StoredPollLifecycleAction | undefined {
+  const row = db.get<{
+    idempotency_key: string;
+    request_sha256: string;
+    requested_at: string;
+  }>(
+    'SELECT idempotency_key, request_sha256, requested_at FROM poll_lifecycle_actions WHERE poll_id = ? AND kind = ?',
+    required(input.pollId, 'pollId'),
+    input.kind
+  );
+  return row ? {
+    idempotencyKey: row.idempotency_key,
+    requestSha256: row.request_sha256,
+    requestedAt: row.requested_at
+  } : undefined;
+}
+
+export function recordPollLifecycleAction(db: PluginDatabase, input: {
+  pollId: string;
+  kind: 'finalize' | 'cancel';
+  idempotencyKey: string;
+  requestSha256: string;
+  requestedAt: string;
+}): { inserted: boolean; action: StoredPollLifecycleAction } {
+  const pollId = required(input.pollId, 'pollId');
+  const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
+  const requestSha256 = sha256Schema.parse(input.requestSha256);
+  const requestedAt = timestampSchema.parse(input.requestedAt);
+  return db.transaction(() => {
+    const existing = getPollLifecycleAction(db, { pollId, kind: input.kind });
+    if (existing) {
+      if (existing.idempotencyKey !== idempotencyKey || existing.requestSha256 !== requestSha256) {
+        throw new Error(`Poll lifecycle ${input.kind} is already bound to different input.`);
+      }
+      return { inserted: false, action: existing };
+    }
+    db.run(
+      `INSERT INTO poll_lifecycle_actions (
+         poll_id, kind, idempotency_key, request_sha256, requested_at
+       ) VALUES (?, ?, ?, ?, ?)`,
+      pollId,
+      input.kind,
+      idempotencyKey,
+      requestSha256,
+      requestedAt
+    );
+    return {
+      inserted: true,
+      action: { idempotencyKey, requestSha256, requestedAt }
+    };
   });
 }
 
@@ -3918,6 +4089,89 @@ function validateDeliveryIntent(delivery: PollDeliveryIntent): void {
   }
 }
 
+function requirePresentationDelivery(
+  poll: StoredPoll,
+  delivery: PollDeliveryIntent | undefined,
+  label: string
+): void {
+  if (poll.presentationOwner === 'source_plugin') {
+    if (delivery) {
+      throw new Error(`Source-owned presentation must suppress the Poll Assistant ${label} delivery.`);
+    }
+    return;
+  }
+  if (!delivery) {
+    throw new Error(`Poll Assistant-owned presentation requires a ${label} delivery.`);
+  }
+}
+
+function assertLifecycleSnapshotMatchesPoll(
+  snapshot: PollAssistantLifecycleSnapshot,
+  poll: StoredPoll,
+  round: PollRoundRow,
+  completedAt: string
+): void {
+  if (
+    poll.sourceLifecycleKind !== 'survey'
+    || !poll.source
+    || snapshot.sourcePluginId !== poll.source.pluginId
+    || snapshot.sourceIdempotencyKey !== poll.source.idempotencyKey
+    || snapshot.groupWid !== poll.chatId
+    || snapshot.pollId !== poll.id
+    || snapshot.roundId !== round.id
+    || snapshot.pollWaMessageId !== round.poll_wa_message_id
+    || snapshot.cutoffAt !== round.closes_at
+    || snapshot.finalizedAt !== completedAt
+  ) {
+    throw new Error('Lifecycle snapshot does not match its immutable source survey lifecycle.');
+  }
+  const optionIds = new Set(poll.definition.options.map((option) => option.id));
+  const identityIds = snapshot.ballots.map((ballot) => ballot.voterIdentityId);
+  const sourceIds = snapshot.ballots.map((ballot) => ballot.sourceWaMessageId);
+  requireDistinct(identityIds, 'Lifecycle snapshot voter identity ids');
+  requireDistinct(sourceIds, 'Lifecycle snapshot source message ids');
+  if (
+    identityIds.some((identityId, index) => index > 0 && identityIds[index - 1]!.localeCompare(identityId) > 0)
+    || snapshot.ballots.some((ballot) =>
+      ballot.selectedOptionIds.some((optionId) => !optionIds.has(optionId))
+      || Date.parse(ballot.interactedAt) > Date.parse(snapshot.cutoffAt)
+      || Date.parse(ballot.receivedAt) > Date.parse(snapshot.cutoffAt))
+  ) {
+    throw new Error('Lifecycle snapshot ballots are not a canonical pre-cutoff survey snapshot.');
+  }
+}
+
+function ensurePollLifecycleSnapshot(
+  db: PluginDatabase,
+  input: PollAssistantLifecycleSnapshot,
+  createdAt: string
+): void {
+  const snapshot = pollAssistantLifecycleSnapshotSchema.parse(input);
+  const snapshotJson = JSON.stringify(snapshot);
+  const snapshotSha256 = createHash('sha256').update(snapshotJson).digest('hex');
+  const existing = db.get<{ snapshot_sha256: string }>(
+    'SELECT snapshot_sha256 FROM poll_lifecycle_snapshots WHERE round_id = ?',
+    snapshot.roundId
+  );
+  if (existing) {
+    if (existing.snapshot_sha256 !== snapshotSha256) {
+      throw new Error(`Poll lifecycle snapshot ${snapshot.roundId} is immutable and already differs.`);
+    }
+    return;
+  }
+  db.run(
+    `INSERT INTO poll_lifecycle_snapshots (
+       round_id, poll_id, snapshot_json, snapshot_sha256, cutoff_at, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?)`,
+    snapshot.roundId,
+    snapshot.pollId,
+    snapshotJson,
+    snapshotSha256,
+    snapshot.cutoffAt,
+    timestampSchema.parse(createdAt)
+  );
+}
+
 function pollFromRow(row: PollRow): StoredPoll {
   const definition = pollDefinitionSchema.parse(parseJson(row.definition_json, 'poll definition'));
   if (definition.id !== row.id || definition.purpose !== row.purpose) {
@@ -3954,6 +4208,8 @@ function pollFromRow(row: PollRow): StoredPoll {
           }
         }
       : {}),
+    sourceLifecycleKind: row.source_lifecycle_kind,
+    presentationOwner: row.presentation_owner,
     ...(row.automation_policy_json
       ? {
           automationPolicy: pollAssistantAutomationPolicySnapshotSchema.parse(parseJson(
@@ -4135,6 +4391,8 @@ function matchesCreateInput(existing: StoredPollAggregate, input: {
   roundId: string;
   publishIdempotencyKey: string;
   source?: CreatePollInput['source'];
+  sourceLifecycleKind: PollSourceLifecycleKind;
+  presentationOwner: PollPresentationOwner;
   automationPolicy?: PollAssistantAutomationPolicySnapshot | undefined;
   createdAt: string;
 }): boolean {
@@ -4153,6 +4411,8 @@ function matchesCreateInput(existing: StoredPollAggregate, input: {
     && firstRound.id === input.roundId
     && firstRound.publishIdempotencyKey === input.publishIdempotencyKey
     && JSON.stringify(existing.poll.source) === JSON.stringify(input.source)
+    && existing.poll.sourceLifecycleKind === input.sourceLifecycleKind
+    && existing.poll.presentationOwner === input.presentationOwner
     && JSON.stringify(existing.poll.automationPolicy) === JSON.stringify(input.automationPolicy)
     && firstRound.createdAt === input.createdAt;
 }

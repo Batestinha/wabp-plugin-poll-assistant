@@ -602,29 +602,18 @@ async function persistTerminalPublicationFailure(
   error: unknown,
   failedAt: Date
 ): Promise<void> {
-  const t = await context.i18n.translatorForScope(claim.poll.scopeId);
-  const messageKey = error instanceof UnconfirmedPollPublicationError
-    ? 'official.poll-assistant.failure.publicationUnconfirmed'
-    : PUBLICATION_FAILURE_MESSAGE_KEY;
   const deliveryId = `poll-publication-failure:${claim.round.id}`;
+  const delivery = claim.poll.presentationOwner === 'source_plugin'
+    ? undefined
+    : await publicationFailureDelivery(context, claim, error, deliveryId);
   const persisted = failPollRoundPublication(pollsDatabase(context.databases), {
     roundId: claim.round.id,
     claimToken: claim.claimToken,
     error: errorMessage(error),
-    delivery: {
-      id: deliveryId,
-      kind: 'failure',
-      deliveryKey: `publication-failure:${claim.round.id}:v1`,
-      chatId: claim.poll.chatId,
-      text: t(messageKey, {
-        question: claim.poll.definition.question,
-        pollId: claim.poll.id
-      }),
-      idempotencyKey: `poll-assistant:publication-failure:${claim.poll.id}:${claim.round.id}:v1`
-    },
+    ...(delivery ? { delivery } : {}),
     failedAt: failedAt.toISOString()
   });
-  if (persisted) {
+  if (persisted && delivery) {
     await enqueuePollDeliveryJob(context, {
       scopeId: claim.poll.scopeId,
       deliveryId,
@@ -633,6 +622,29 @@ async function persistTerminalPublicationFailure(
       attempt: 1
     });
   }
+}
+
+async function publicationFailureDelivery(
+  context: PluginRuntimeContext,
+  claim: PollPublicationClaim,
+  error: unknown,
+  deliveryId: string
+) {
+  const t = await context.i18n.translatorForScope(claim.poll.scopeId);
+  const messageKey = error instanceof UnconfirmedPollPublicationError
+    ? 'official.poll-assistant.failure.publicationUnconfirmed'
+    : PUBLICATION_FAILURE_MESSAGE_KEY;
+  return {
+    id: deliveryId,
+    kind: 'failure' as const,
+    deliveryKey: `publication-failure:${claim.round.id}:v1`,
+    chatId: claim.poll.chatId,
+    text: t(messageKey, {
+      question: claim.poll.definition.question,
+      pollId: claim.poll.id
+    }),
+    idempotencyKey: `poll-assistant:publication-failure:${claim.poll.id}:${claim.round.id}:v1`
+  };
 }
 
 async function reschedulePublication(

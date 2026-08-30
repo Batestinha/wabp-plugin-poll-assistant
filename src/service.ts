@@ -48,6 +48,7 @@ import {
   pollAssistantAutomationPolicySnapshotSchema,
   pollAssistantPolicyNotBefore
 } from './workingHours';
+import { registerPollAssistantLifecycleService } from './lifecycleService';
 
 export function registerPollAssistantServices(
   context: PluginServiceRegistrationContext
@@ -108,7 +109,7 @@ export function registerPollAssistantServices(
         }
       }
     ]
-  }];
+  }, registerPollAssistantLifecycleService(context)];
 }
 
 async function ensureAutomatedPoll(
@@ -188,6 +189,7 @@ async function ensureAutomatedPoll(
         idempotencyKey: input.sourceIdempotencyKey,
         requestSha256
       },
+      sourceLifecycleKind: 'automation',
       automationPolicy,
       maxActivePollsPerChat: config.maxActivePollsPerChat,
       createdAt

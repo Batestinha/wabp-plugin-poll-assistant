@@ -3,6 +3,7 @@ import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runti
 import { mapAuthoritativePollReadback } from './authoritativeReadback';
 import type { PollBallotMappingTarget } from './ballotMapping';
 import type { PollReadbackBallot } from './domain';
+import type { PollAssistantLifecycleSnapshot } from './lifecycleServiceApi';
 import { parsePollAssistantConfig } from './config';
 import {
   DOAS_PRIVATE_POLL_RECONCILE_METHOD,
@@ -122,41 +123,22 @@ export async function finalizePollRound(
       ballots,
       cutoffAt: cutoffAt.toISOString()
     });
-    const [t, localeResolution, configInput] = await Promise.all([
-      context.i18n.translatorForScope(claim.poll.scopeId),
-      context.i18n.resolveScopeLocale(claim.poll.scopeId),
-      context.configFor(claim.poll.scopeId)
-    ]);
-    const config = parsePollAssistantConfig(configInput);
-    const cutoffAtLabel = formatTimestamp(cutoffAt, config.timezone, localeResolution.locale);
-    const deliveryId = `poll-result:${roundId}`;
-    const resultMessages = renderPollResultMessages({
-      definition: claim.poll.definition,
-      result,
-      ballots,
-      electorate: aggregate.electorate,
-      cutoffAtLabel,
-      locale: localeResolution.locale,
-      t
-    });
     const completedAt = clock();
-    const deliveries = resultMessages.map((text, index) => ({
-      id: index === 0 ? deliveryId : `${deliveryId}:page:${index + 1}`,
-      kind: index === 0 && result.purpose === 'decide' && result.outcome.status === 'tie'
-        ? 'tie' as const
-        : 'result' as const,
-      deliveryKey: index === 0 ? `result:${roundId}:v1` : `result:${roundId}:page:${index + 1}:v1`,
-      chatId: claim.poll.chatId,
-      text,
-      idempotencyKey: index === 0
-        ? `poll-assistant:result:${claim.poll.id}:${roundId}:v1`
-        : `poll-assistant:result:${claim.poll.id}:${roundId}:page:${index + 1}:v1`,
-      deliveryBatchKey: `poll-result:${roundId}`,
-      deliverySequence: index,
-      ...(index > 0
-        ? { notBefore: new Date(completedAt.getTime() + index * 2_000).toISOString() }
-        : {})
-    }));
+    const lifecycleSnapshot = claim.poll.sourceLifecycleKind === 'survey'
+      ? sourceSurveySnapshot(claim, readbackBallots, cutoffAt, completedAt)
+      : undefined;
+    const deliveries = claim.poll.presentationOwner === 'source_plugin'
+      ? []
+      : await resultDeliveries({
+          context,
+          claim,
+          roundId,
+          result,
+          ballots,
+          electorate: aggregate.electorate,
+          cutoffAt,
+          completedAt
+        });
     renewFinalizationClaim(db, claim, completedAt);
     const completed = completePollRoundFinalization(db, {
       roundId,
@@ -164,8 +146,9 @@ export async function finalizePollRound(
       result,
       inputSha256,
       readbackSource: 'transport_readback',
-      delivery: deliveries[0]!,
+      ...(deliveries[0] ? { delivery: deliveries[0] } : {}),
       additionalDeliveries: deliveries.slice(1),
+      ...(lifecycleSnapshot ? { lifecycleSnapshot } : {}),
       completedAt: completedAt.toISOString()
     });
     if (completed === 'completed' || completed === 'already_completed') {
@@ -194,6 +177,93 @@ export async function finalizePollRound(
   } catch (error) {
     await rescheduleFinalization(context, claim, error, clock());
   }
+}
+
+async function resultDeliveries(input: {
+  context: PluginRuntimeContext;
+  claim: PollFinalizationClaim;
+  roundId: string;
+  result: Parameters<typeof renderPollResultMessages>[0]['result'];
+  ballots: Parameters<typeof renderPollResultMessages>[0]['ballots'];
+  electorate: Parameters<typeof renderPollResultMessages>[0]['electorate'];
+  cutoffAt: Date;
+  completedAt: Date;
+}) {
+  const [t, localeResolution, configInput] = await Promise.all([
+    input.context.i18n.translatorForScope(input.claim.poll.scopeId),
+    input.context.i18n.resolveScopeLocale(input.claim.poll.scopeId),
+    input.context.configFor(input.claim.poll.scopeId)
+  ]);
+  const config = parsePollAssistantConfig(configInput);
+  const cutoffAtLabel = formatTimestamp(input.cutoffAt, config.timezone, localeResolution.locale);
+  const resultMessages = renderPollResultMessages({
+    definition: input.claim.poll.definition,
+    result: input.result,
+    ballots: input.ballots,
+    electorate: input.electorate,
+    cutoffAtLabel,
+    locale: localeResolution.locale,
+    t
+  });
+  const deliveryId = `poll-result:${input.roundId}`;
+  return resultMessages.map((text, index) => ({
+    id: index === 0 ? deliveryId : `${deliveryId}:page:${index + 1}`,
+    kind: index === 0 && input.result.purpose === 'decide' && input.result.outcome.status === 'tie'
+      ? 'tie' as const
+      : 'result' as const,
+    deliveryKey: index === 0
+      ? `result:${input.roundId}:v1`
+      : `result:${input.roundId}:page:${index + 1}:v1`,
+    chatId: input.claim.poll.chatId,
+    text,
+    idempotencyKey: index === 0
+      ? `poll-assistant:result:${input.claim.poll.id}:${input.roundId}:v1`
+      : `poll-assistant:result:${input.claim.poll.id}:${input.roundId}:page:${index + 1}:v1`,
+    deliveryBatchKey: `poll-result:${input.roundId}`,
+    deliverySequence: index,
+    ...(index > 0
+      ? { notBefore: new Date(input.completedAt.getTime() + index * 2_000).toISOString() }
+      : {})
+  }));
+}
+
+function sourceSurveySnapshot(
+  claim: PollFinalizationClaim,
+  ballots: readonly PollReadbackBallot[],
+  cutoffAt: Date,
+  completedAt: Date
+): PollAssistantLifecycleSnapshot {
+  const source = claim.poll.source;
+  const pollWaMessageId = claim.round.pollWaMessageId;
+  if (!source || !pollWaMessageId) {
+    throw new Error('Source survey finalization has no immutable source or publication reference.');
+  }
+  return {
+    schemaVersion: 1,
+    sourcePluginId: source.pluginId,
+    sourceIdempotencyKey: source.idempotencyKey,
+    groupWid: claim.poll.chatId,
+    pollId: claim.poll.id,
+    roundId: claim.round.id,
+    pollWaMessageId,
+    cutoffAt: cutoffAt.toISOString(),
+    finalizedAt: completedAt.toISOString(),
+    ballots: [...ballots]
+      .sort((left, right) => left.voterIdentityId.localeCompare(right.voterIdentityId))
+      .map((ballot) => {
+        if (!ballot.sourceWaMessageId || !ballot.receivedAt) {
+          throw new Error('Source survey readback lacks an immutable source or receipt timestamp.');
+        }
+        return {
+          voterIdentityId: ballot.voterIdentityId,
+          voterWid: ballot.voterWid,
+          selectedOptionIds: [...ballot.selectedOptionIds],
+          sourceWaMessageId: ballot.sourceWaMessageId,
+          interactedAt: ballot.interactedAt,
+          receivedAt: ballot.receivedAt
+        };
+      })
+  };
 }
 
 async function reconcilePrivatePollIssuancesAtCutoff(

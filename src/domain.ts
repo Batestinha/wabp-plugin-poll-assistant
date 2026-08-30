@@ -330,7 +330,9 @@ export const pollReadbackBallotSchema = z.object({
   voterWid: z.string().trim().min(1).max(200),
   selectedOptionIds: z.array(stableIdSchema).max(WHATSAPP_POLL_MAX_OPTIONS)
     .refine((ids) => new Set(ids).size === ids.length, 'Selected option ids must be unique'),
-  interactedAt: isoTimestampSchema
+  sourceWaMessageId: stableIdSchema.optional(),
+  interactedAt: isoTimestampSchema,
+  receivedAt: isoTimestampSchema.optional()
 }).strict();
 
 export const pollOptionTallySchema = z.object({

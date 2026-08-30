@@ -76,7 +76,9 @@ export function mapResolvedPollVoteToReadbackBallot(
     voterIdentityId: vote.voterIdentityId,
     voterWid: vote.voterWid,
     selectedOptionIds: mapped.selectedOptionIds,
-    interactedAt: mapped.interactedAt
+    sourceWaMessageId: mapped.sourceWaMessageId,
+    interactedAt: mapped.interactedAt,
+    ...(vote.receivedAt ? { receivedAt: vote.receivedAt.toISOString() } : {})
   });
 }
 
