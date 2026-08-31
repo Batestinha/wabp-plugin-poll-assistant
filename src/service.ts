@@ -128,6 +128,14 @@ async function ensureAutomatedPoll(
     workingHoursTimezone: input.workingHoursTimezone,
     bypassWorkingHours
   });
+  const legacyRequestSha256 = input.workingHoursTimezone
+    ? digestJson({
+        groupWid: input.groupWid,
+        organizerIdentityId: actor.identityId,
+        definition,
+        bypassWorkingHours
+      })
+    : undefined;
   const db = pollsDatabase(context.databases);
   const existing = getPollAggregateBySource(db, {
     scopeId: call.scopeId,
@@ -135,7 +143,13 @@ async function ensureAutomatedPoll(
     sourceIdempotencyKey: input.sourceIdempotencyKey
   });
   if (existing) {
-    assertExistingAutomationInput(existing, input.groupWid, actor.identityId, requestSha256);
+    assertExistingAutomationInput(
+      existing,
+      input.groupWid,
+      actor.identityId,
+      requestSha256,
+      legacyRequestSha256
+    );
     return pollAssistantEnsurePollOutputSchema.parse(automationEnvelope(existing, 'existing'));
   }
   if (!await context.enabledFor(call.scopeId)) {
@@ -570,12 +584,17 @@ function assertExistingAutomationInput(
   aggregate: StoredPollAggregate,
   groupWid: string,
   organizerIdentityId: string,
-  requestSha256: string
+  requestSha256: string,
+  legacyRequestSha256?: string
 ): void {
+  const storedRequestSha256 = aggregate.poll.source?.requestSha256;
   if (
     normalizeWid(aggregate.poll.chatId) !== normalizeWid(groupWid)
     || aggregate.poll.creatorIdentityId !== organizerIdentityId
-    || aggregate.poll.source?.requestSha256 !== requestSha256
+    || (
+      storedRequestSha256 !== requestSha256
+      && storedRequestSha256 !== legacyRequestSha256
+    )
   ) {
     throw new Error('Source idempotency key is already bound to different canonical poll input.');
   }
