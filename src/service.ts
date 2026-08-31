@@ -125,6 +125,7 @@ async function ensureAutomatedPoll(
     groupWid: input.groupWid,
     organizerIdentityId: actor.identityId,
     definition,
+    workingHoursTimezone: input.workingHoursTimezone,
     bypassWorkingHours
   });
   const db = pollsDatabase(context.databases);
@@ -153,7 +154,7 @@ async function ensureAutomatedPoll(
   const publishIdempotencyKey = `poll-assistant:auto:${digest}`;
   const createdAt = new Date().toISOString();
   const automationPolicy = pollAssistantAutomationPolicySnapshotSchema.parse({
-    timezone: config.timezone,
+    timezone: input.workingHoursTimezone ?? config.timezone,
     workingHours: config.automationWorkingHours,
     bypassWorkingHours
   });

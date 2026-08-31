@@ -4,7 +4,10 @@ import {
   pollElectorateDefinitionSchema,
   pollOptionTallySchema
 } from './domain';
-import { pollAssistantAutomationPolicySnapshotSchema } from './workingHours';
+import {
+  pollAssistantAutomationPolicySnapshotSchema,
+  pollAssistantTimezoneSchema
+} from './workingHours';
 
 export const POLL_ASSISTANT_AUTOMATION_SERVICE_ID = 'official.poll-assistant.automation.v1';
 export const POLL_ASSISTANT_ENSURE_POLL_METHOD = 'ensurePoll';
@@ -41,6 +44,7 @@ export const pollAssistantEnsurePollInputSchema = z.object({
   groupWid: groupWidSchema,
   sourceIdempotencyKey: stableIdSchema,
   definition: pollAssistantAutomationDefinitionSchema,
+  workingHoursTimezone: pollAssistantTimezoneSchema.optional(),
   bypassWorkingHours: z.boolean().default(false)
 }).strict();
 

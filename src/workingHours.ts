@@ -26,7 +26,7 @@ export const pollAssistantWorkingHoursSchema = z.object({
 
 export type PollAssistantWorkingHours = z.infer<typeof pollAssistantWorkingHoursSchema>;
 
-const ianaTimezoneSchema = z.string().trim().min(1).refine((value) => {
+export const pollAssistantTimezoneSchema = z.string().trim().min(1).refine((value) => {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: value }).format();
     return true;
@@ -36,7 +36,7 @@ const ianaTimezoneSchema = z.string().trim().min(1).refine((value) => {
 }, 'Must be a valid IANA timezone');
 
 export const pollAssistantAutomationPolicySnapshotSchema = z.object({
-  timezone: ianaTimezoneSchema,
+  timezone: pollAssistantTimezoneSchema,
   workingHours: pollAssistantWorkingHoursSchema,
   bypassWorkingHours: z.boolean()
 }).strict();
