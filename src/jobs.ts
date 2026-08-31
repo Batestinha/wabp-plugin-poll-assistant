@@ -170,6 +170,7 @@ export async function enqueuePollPrivateIssueJob(
     groupWid: string;
     attempt: number;
     runAt?: Date | undefined;
+    replaceRetainedTerminalJob?: boolean | undefined;
   }
 ): Promise<void> {
   await enqueuePluginJob(context.queue, {
@@ -182,7 +183,8 @@ export async function enqueuePollPrivateIssueJob(
     ...(input.runAt ? { runAt: input.runAt } : {}),
     // Recovery may rediscover a not-yet-due issuance. Keep one durable job for
     // each claim attempt regardless of which sweep calculated its runAt.
-    dedupeKey: `${POLL_PRIVATE_ISSUE_JOB}:${input.issuanceId}:${input.attempt}`
+    dedupeKey: `${POLL_PRIVATE_ISSUE_JOB}:${input.issuanceId}:${input.attempt}`,
+    ...(input.replaceRetainedTerminalJob ? { replaceRetainedTerminalJob: true } : {})
   });
 }
 

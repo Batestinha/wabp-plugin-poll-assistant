@@ -176,7 +176,8 @@ export async function recoverPollAssistantJobs(
       ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
       groupWid: snapshot.poll.chatId,
       attempt: issuance.attempt + 1,
-      runAt: new Date(now.getTime() + privateIssuanceSlot * POLL_PRIVATE_ISSUANCE_PACING_MS)
+      runAt: new Date(now.getTime() + privateIssuanceSlot * POLL_PRIVATE_ISSUANCE_PACING_MS),
+      replaceRetainedTerminalJob: true
     });
     privateIssuanceSlot += 1;
     enqueued += 1;
