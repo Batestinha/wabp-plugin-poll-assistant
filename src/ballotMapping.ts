@@ -1,5 +1,6 @@
 import { equivalentWhatsAppMessageIds } from '../../../platform/transport/messageIds';
 import {
+  numberPollOptions,
   WHATSAPP_POLL_MAX_OPTIONS,
   WHATSAPP_POLL_MIN_OPTIONS
 } from '../../../platform/transport/pollContract';
@@ -128,6 +129,7 @@ function mapResolvedPollVote(
 
 function canonicalOptionSnapshot(target: PollBallotMappingTarget): PollRoundOptionSnapshot[] {
   const options = [...target.options].sort((left, right) => left.ordinal - right.ordinal);
+  const renderedWireLabels = numberPollOptions(options.map((option) => option.wireLabel));
   if (options.length < WHATSAPP_POLL_MIN_OPTIONS || options.length > WHATSAPP_POLL_MAX_OPTIONS) {
     throw new PollBallotMappingError(
       'invalid_option_snapshot',
@@ -137,7 +139,8 @@ function canonicalOptionSnapshot(target: PollBallotMappingTarget): PollRoundOpti
   const ids = new Set<string>();
   const ordinals = new Set<number>();
   const labels = new Set<string>();
-  for (const option of options) {
+  for (const [index, option] of options.entries()) {
+    const renderedWireLabel = renderedWireLabels[index]!;
     if (
       !option.optionId.trim()
       || !Number.isSafeInteger(option.ordinal)
@@ -145,7 +148,7 @@ function canonicalOptionSnapshot(target: PollBallotMappingTarget): PollRoundOpti
       || !option.wireLabel.trim()
       || ids.has(option.optionId)
       || ordinals.has(option.ordinal)
-      || labels.has(option.wireLabel)
+      || labels.has(renderedWireLabel)
     ) {
       throw new PollBallotMappingError(
         'invalid_option_snapshot',
@@ -154,7 +157,7 @@ function canonicalOptionSnapshot(target: PollBallotMappingTarget): PollRoundOpti
     }
     ids.add(option.optionId);
     ordinals.add(option.ordinal);
-    labels.add(option.wireLabel);
+    labels.add(renderedWireLabel);
   }
   if (options.some((option, index) => option.ordinal !== index + 1)) {
     throw new PollBallotMappingError(
@@ -162,7 +165,13 @@ function canonicalOptionSnapshot(target: PollBallotMappingTarget): PollRoundOpti
       `Round ${target.roundId} option ordinals are not contiguous.`
     );
   }
-  return options;
+  return options.map((option, index) => ({
+    ...option,
+    // Every transport applies the canonical numeric wire rendering before
+    // publication. Source-owned surveys retain their exact logical labels in
+    // storage, so readback must compare against what WhatsApp actually saw.
+    wireLabel: renderedWireLabels[index]!
+  }));
 }
 
 function mapSelections(
