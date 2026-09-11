@@ -232,7 +232,10 @@ async function finalizeSourceSurvey(
   if (!['open', 'finalizing', 'finalized', 'cancelled', 'failed'].includes(round.status)) {
     throw new Error('Source survey cannot be finalized before its native poll is open.');
   }
-  const requestedAt = new Date();
+  const requestedAt = input.cutoffAt ? new Date(input.cutoffAt) : new Date();
+  if (requestedAt.getTime() > Date.now()) {
+    throw new Error('Source survey finalization cutoff cannot be in the future.');
+  }
   const action = recordPollLifecycleAction(db, {
     pollId: aggregate.poll.id,
     kind: 'finalize',
