@@ -68,7 +68,8 @@ export const pollAssistantLifecycleInspectInputSchema = z.object({
 
 export const pollAssistantLifecycleFinalizeInputSchema = z.object({
   ...lifecycleReferenceInput,
-  finalizationIdempotencyKey: stableIdSchema
+  finalizationIdempotencyKey: stableIdSchema,
+  cutoffAt: isoTimestampSchema.optional()
 }).strict();
 
 export const pollAssistantLifecycleCancelInputSchema = z.object({
