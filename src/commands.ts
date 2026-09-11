@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto';
+import { previewAssistantFlow } from '../../../adminBot/flows/assistantFlowPreview';
+import { createPollCreationFlowDefinition, pollCreationPresetInitialData } from './flow';
+import { parseCommand } from '../../../adminBot/router/commandParser';
 import { z } from 'zod';
 import type { FlowEngine, FlowSessionSnapshot } from '../../../adminBot/flows/flowEngine';
 import type { CommandMetadata } from '../../../adminBot/router/commandMetadata';
@@ -137,6 +140,20 @@ type PollCreationCompletionDecision = z.infer<typeof pollCreationCompletionDecis
 
 export function registerPollAssistantCommands(context: PluginCommandContext): void {
   requireOfficialCommandRuntime(context);
+  context.flowEngine.registerAssistantCommandPreparation?.('poll.create', async ({ body, context: assistant, answers }) => {
+    const runtime = requireOfficialCommandRuntime(context);
+    const config = parsePollAssistantConfig(await runtime.configFor(assistant.scopeId, assistant.actor.identityAddress.identityId));
+    if (!config.allowCreation) throw new Error('Poll creation is disabled');
+    const requestedPresetId = parseCommand(body)?.args[0];
+    const preset = resolvePollCreationPreset(config, requestedPresetId);
+    if (preset.kind === 'not_found') throw new Error('Poll preset is unavailable');
+    const preferences = flowPreferences(config, preset.preset);
+    const locale = await context.i18n.resolveLocale({ message: assistant.message, actor: assistant.actor, scopeId: assistant.scopeId });
+    const t = context.i18n.translator(locale.locale, locale.languagePackScopes);
+    const initialData = pollCreationPresetInitialData(preset.preset);
+    const definition = createPollCreationFlowDefinition({ t, locale: locale.locale, preferences, initialData, flowInstanceId: 'preview' });
+    return previewAssistantFlow(definition, answers, initialData);
+  });
   const registerCompletion = (flowType: string, t: TranslateFn) => {
     registerPollCreationFlowCompletionHandler(context, flowType, t);
   };
