@@ -2,6 +2,7 @@ import type { TranslateFn } from '../../../platform/i18n';
 import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
 import { parsePollAssistantConfig } from './config';
 import type { PollDefinition } from './domain';
+import { getPollOutcomeConfiguration } from './outcomeStore';
 import { enqueuePollDeliveryJob } from './jobs';
 import {
   ensurePollLifecycleDelivery,
@@ -33,7 +34,11 @@ export async function ensurePollPublicationAnnouncement(
       kind: 'announcement',
       deliveryKey: `${deliveryId}:v1`,
       chatId: snapshot.poll.chatId,
-      text: renderPublicationAnnouncement(snapshot, config.timezone, locale, t),
+      text: renderPublicationAnnouncement(snapshot, config.timezone, locale, t) + (() => {
+        const outcome = getPollOutcomeConfiguration(pollsDatabase(context.databases), snapshot.poll.id);
+        return outcome ? '\n\n' + t('official.poll-assistant.outcome.published', { summary: outcome.summary,
+          policy: t(`official.poll-assistant.outcome.policy.${outcome.policy}`) }) : '';
+      })(),
       idempotencyKey: `poll-assistant:${deliveryId}:v1`,
       deliveryBatchKey,
       deliverySequence: 0
@@ -180,6 +185,21 @@ function quorumLabel(definition: PollDefinition, t: TranslateFn): string {
       : t('official.poll-assistant.flow.summary.quorum.percentage', {
           percentage: (definition.quorum.minimumTurnoutBasisPoints / 100).toFixed(2)
         });
+}
+
+export function renderPollConfiguration(definition: PollDefinition, t: TranslateFn, timezone: string): string {
+  const closing = definition.closing;
+  const deadline = closing.kind === 'manual' ? t('official.poll-assistant.flow.summary.manual')
+    : closing.deadline.mode === 'at' ? `${closing.deadline.closesAt} (${timezone})`
+      : closing.deadline.mode === 'after_first_non_creator_response' ? t('official.poll-assistant.flow.summary.afterFirstResponse', {
+        minutes: closing.deadline.durationMinutes, timeoutMinutes: closing.deadline.activationTimeoutMinutes
+      }) : t('official.poll-assistant.flow.summary.duration', { minutes: closing.deadline.durationMinutes });
+  return t('official.poll-assistant.outcome.createRules', { purpose: t(`official.poll-assistant.purpose.${definition.purpose}`),
+    rule: ruleLabel(definition, t), closing: deadline, quorum: quorumLabel(definition, t),
+    tie: definition.purpose === 'decide' ? t(`official.poll-assistant.flow.tiePolicy.${tiePolicyKey(definition.tiePolicy.kind)}`) : '-',
+    electorate: t(`official.poll-assistant.outcome.electorate.${definition.electorate.kind}`),
+    delivery: t(`official.poll-assistant.flow.ballotDelivery.${definition.ballotDelivery}`),
+    disclosure: t(`official.poll-assistant.flow.voterDisclosure.${definition.voterDisclosure}`) });
 }
 
 function ruleLabel(definition: PollDefinition, t: TranslateFn): string {

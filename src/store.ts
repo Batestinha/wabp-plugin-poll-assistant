@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import type { FrozenPollOutcome } from './outcomeConfig';
+import { ensurePollOutcomeHandoff, getPollOutcomeConfiguration, savePollOutcomeConfiguration } from './outcomeStore';
 import type {
   PluginDatabase,
   PluginDatabaseRegistry,
@@ -79,6 +81,8 @@ export class PollTieResultDeliveryPendingError extends Error {
 }
 
 export interface CreatePollInput {
+  outcome?: FrozenPollOutcome | undefined;
+  workflowOperation?: { operationId: string; inputDigest: string } | undefined;
   definition: PollDefinition;
   scopeId: string;
   chatId: string;
@@ -497,6 +501,8 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
       })) {
         throw new Error(`Poll id ${definition.id} is already bound to different canonical input.`);
       }
+      const existingOutcome = getPollOutcomeConfiguration(db, definition.id);
+      if (JSON.stringify(existingOutcome) !== JSON.stringify(input.outcome)) throw new Error('Poll consequences cannot change on retry');
       return existing;
     }
     const activeCount = db.get<{ count: number }>(
@@ -580,6 +586,12 @@ export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPo
         option.ordinal
       );
     });
+    if (input.outcome) savePollOutcomeConfiguration(db, definition.id, input.outcome);
+    if (input.workflowOperation) {
+      db.run('INSERT INTO poll_workflow_operations (operation_id, poll_id, scope_id, actor_identity_id, input_digest) VALUES (?, ?, ?, ?, ?)',
+        required(input.workflowOperation.operationId, 'operationId'), definition.id, scopeId, creatorIdentityId,
+        sha256Schema.parse(input.workflowOperation.inputDigest));
+    }
     return getPollAggregate(db, definition.id)!;
   });
 }
@@ -3227,6 +3239,7 @@ export function completePollRoundFinalization(db: PluginDatabase, input: {
         ensurePollLifecycleSnapshot(db, lifecycleSnapshot, completedAt);
       }
       ensurePollRandomDrawAuditIntent(db, roundId, resultDocument, completedAt);
+      ensurePollOutcomeHandoff(db, resultDocument, completedAt);
       return 'already_completed';
     }
     const round = db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ?', roundId);
@@ -3255,6 +3268,7 @@ export function completePollRoundFinalization(db: PluginDatabase, input: {
       completedAt
     );
     ensurePollRandomDrawAuditIntent(db, roundId, resultDocument, completedAt);
+    ensurePollOutcomeHandoff(db, resultDocument, completedAt);
     if (lifecycleSnapshot) {
       ensurePollLifecycleSnapshot(db, lifecycleSnapshot, completedAt);
     }
@@ -4014,6 +4028,7 @@ export function resolvePollTie(db: PluginDatabase, input: {
       round.poll_id
     );
     insertDelivery(db, round.poll_id, roundId, input.delivery, resolvedAt);
+    ensurePollOutcomeHandoff(db, result, resolvedAt, input.selectedOptionIds);
   });
 }
 

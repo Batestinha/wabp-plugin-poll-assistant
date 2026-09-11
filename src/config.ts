@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { pollOutcomePresetSchema } from './outcomeConfig';
 import { pollAssistantWorkingHoursSchema } from './workingHours';
 
 const pollCreationFieldModeSchema = z.enum(['ask', 'suggest', 'fixed']);
@@ -67,6 +68,7 @@ const pollVoterDisclosurePolicySchema = z.object({
 }).strict().default({});
 
 export const pollCreationPresetSchema = z.object({
+  outcome: pollOutcomePresetSchema.optional(),
   id: z.string().trim().min(1).max(64).regex(
     /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/,
     'Preset IDs may contain lowercase letters, numbers, dots, underscores, and hyphens'

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { attachPollOutcomeFlow } from './outcomeFlow';
 import { z } from 'zod';
 import type {
   FlowEngine,
@@ -183,13 +184,13 @@ export class PollCreationFlowStarter {
       [POLL_CREATION_RECIPE_DATA_KEY]: recipe
     };
     const t = this.context.i18n.translator(recipe.locale, recipe.languagePackScopes);
-    const definition = createPollCreationFlowDefinition({
+    const definition = attachPollOutcomeFlow(createPollCreationFlowDefinition({
       t,
       locale: recipe.locale,
       preferences: recipe.preferences,
       flowInstanceId: recipe.pollId,
       initialData
-    });
+    }), this.context.flowEngine, recipe, t);
     this.registerCompletionHandler(definition.flowType, t);
     const flowStart = await this.context.flowEngine.startFlowForIdentity({
       definition,
@@ -223,13 +224,13 @@ export class PollCreationFlowStarter {
       throw new Error(`Poll creation flow ${snapshot.id} could not be recovered.`);
     }
     const t = this.context.i18n.translator(recipe.locale, recipe.languagePackScopes);
-    const definition = restorePollCreationFlowDefinition({
+    const definition = attachPollOutcomeFlow(restorePollCreationFlowDefinition({
       flowType: recipe.flowType,
       t,
       locale: recipe.locale,
       preferences: recipe.preferences,
       initialData: snapshot.state.data
-    });
+    }), this.context.flowEngine, recipe, t);
     this.context.flowEngine.register(definition);
     this.registerCompletionHandler(snapshot.flowType, t);
     if (!await this.context.flowEngine.ensureInitialPromptDelivered(snapshot.id)) {
@@ -263,13 +264,13 @@ export function registerPollCreationFlowDefinitionResolver(
         throw new Error(`Poll creation flow ${session.id} has no valid durable session recipe.`);
       }
       const t = context.i18n.translator(recipe.locale, recipe.languagePackScopes);
-      const definition = restorePollCreationFlowDefinition({
+      const definition = attachPollOutcomeFlow(restorePollCreationFlowDefinition({
         flowType: recipe.flowType,
         t,
         locale: recipe.locale,
         preferences: recipe.preferences,
         initialData: session.state.data
-      });
+      }), context.flowEngine, recipe, t);
       registerCompletionHandler(definition.flowType, t);
       return definition;
     }

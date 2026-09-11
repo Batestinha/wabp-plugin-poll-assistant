@@ -25,6 +25,7 @@ import {
   POLL_ASSISTANT_RESOLVE_POLL_METHOD
 } from './serviceApi';
 import { pollAssistantMessages } from './messages';
+import { pollCreateAction, POLL_CREATE_ACTION_SERVICE } from './createActionApi';
 import {
   POLL_ASSISTANT_LIFECYCLE_CANCEL_METHOD,
   POLL_ASSISTANT_LIFECYCLE_ENSURE_METHOD,
@@ -36,7 +37,7 @@ import {
 export const pollAssistantManifest: PluginManifest = {
   pluginId: POLL_ASSISTANT_PLUGIN_ID,
   kind: 'managed_group',
-  version: '0.3.0',
+  version: '0.4.0',
   coreApiRange: '>=0.2.0',
   messageNamespace: 'official.poll-assistant',
   descriptionKey: 'official.poll-assistant.description',
@@ -49,7 +50,8 @@ export const pollAssistantManifest: PluginManifest = {
     '/poll open',
     '/poll close',
     '/poll cancel',
-    '/poll resolve'
+    '/poll resolve',
+    '/poll actions'
   ],
   help: {
     featureId: 'poll-assistant',
@@ -118,6 +120,10 @@ export const pollAssistantManifest: PluginManifest = {
   },
   eventSubscriptions: ['poll.vote', 'participant.change', 'plugin.job'],
   services: [
+    { serviceId: POLL_CREATE_ACTION_SERVICE, methods: [
+      { name: 'describe', access: 'read' }, { name: 'prepare', access: 'read' },
+      { name: 'execute', access: 'mutation' }, { name: 'inspect', access: 'read' }
+    ] },
     {
       serviceId: POLL_ASSISTANT_AUTOMATION_SERVICE_ID,
       description: 'Idempotent source-owned automated decision poll lifecycles.',
@@ -190,7 +196,8 @@ export const pollAssistantManifest: PluginManifest = {
   ],
   databases: [...pollAssistantDatabases],
   ownedData: [{ resource: POLL_HISTORY_OWNED_DATA_RESOURCE }],
-  dataVersion: '4',
+  dataVersion: '5',
+  workflowActions: [pollCreateAction],
   assistant: {
     summary: pollAssistantMessages['official.poll-assistant.assistant.summary']!,
     summaryKey: 'official.poll-assistant.assistant.summary',

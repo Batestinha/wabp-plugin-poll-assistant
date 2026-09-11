@@ -1,4 +1,5 @@
 import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
+import { recoverPollOutcomes } from './outcomes';
 import { cleanupPollBallots } from './delivery';
 import type { PollElector } from './domain';
 import { parsePollAssistantConfig } from './config';
@@ -47,7 +48,7 @@ export async function recoverPollAssistantJobs(
   now: Date = new Date()
 ): Promise<number> {
   const db = pollsDatabase(context.databases);
-  let enqueued = 0;
+  let enqueued = await recoverPollOutcomes(context, now);
   for (const missing of listPollRoundIdsMissingAnnouncements(db, 100)) {
     const ensured = missing.kind === 'publication'
       ? await ensurePollPublicationAnnouncement(context, missing.roundId, now)

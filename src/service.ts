@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { registerPollCreateAction } from './createAction';
 import type { PluginServiceRegistration } from '../../../platform/pluginRuntime/pluginServices';
 import type { PluginServiceRegistrationContext } from '../../../platform/pluginRuntime/types';
 import { parsePollAssistantConfig } from './config';
@@ -109,7 +110,7 @@ export function registerPollAssistantServices(
         }
       }
     ]
-  }, registerPollAssistantLifecycleService(context)];
+  }, registerPollAssistantLifecycleService(context), registerPollCreateAction(context)];
 }
 
 async function ensureAutomatedPoll(

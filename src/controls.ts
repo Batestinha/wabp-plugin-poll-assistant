@@ -93,7 +93,8 @@ export const pollAssistantControls: ControlDescriptor[] = [
     { type: 'array', items: { type: 'object' } },
     {
       widget: 'builder',
-      builderId: 'official.poll-assistant.creation-presets.v1'
+      builderId: 'official.poll-assistant.creation-presets.v1',
+      builderEndpoints: { actions: '/api/v1/operator-console/workflow-actions' }
     }
   ),
   control(

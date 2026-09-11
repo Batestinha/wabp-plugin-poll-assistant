@@ -3,6 +3,9 @@ import { previewAssistantFlow } from '../../../adminBot/flows/assistantFlowPrevi
 import { createPollCreationFlowDefinition, pollCreationPresetInitialData } from './flow';
 import { parseCommand } from '../../../adminBot/router/commandParser';
 import { z } from 'zod';
+import { pollActionsCommand, registerPollOutcomeApprovals } from './outcomes';
+import { pollOutcomeFromFlow } from './outcomeFlow';
+import { frozenPollOutcomeSchema, freezePollOutcome } from './outcomeConfig';
 import type { FlowEngine, FlowSessionSnapshot } from '../../../adminBot/flows/flowEngine';
 import type { CommandMetadata } from '../../../adminBot/router/commandMetadata';
 import type { CommandContext } from '../../../adminBot/router/commandRouter';
@@ -122,6 +125,7 @@ const pollCreationTerminalDecisionSchema = z.object({
 });
 
 const pollCreationCreateDecisionSchema = z.object({
+  outcome: frozenPollOutcomeSchema.optional(),
   schemaVersion: z.literal(1),
   kind: z.literal('create'),
   pollId: z.string().trim().min(1).max(200),
@@ -140,6 +144,25 @@ type PollCreationCompletionDecision = z.infer<typeof pollCreationCompletionDecis
 
 export function registerPollAssistantCommands(context: PluginCommandContext): void {
   requireOfficialCommandRuntime(context);
+  registerPollOutcomeApprovals(context.flowEngine);
+  context.flowEngine.registerAssistantCommandVerification?.('poll.*', async (owner, sessions) => {
+    const session = sessions.find((session) => isPollCreationFlowType(session.flowType));
+    if (!session || session.status !== 'COMPLETED') return undefined;
+    const snapshot = await context.flowEngine.getSessionSnapshot(session.id);
+    const recipe = snapshot ? pollCreationRecipeFromSnapshot(snapshot) : undefined;
+    if (!recipe) return undefined;
+    const aggregate = getPollAggregate(pollsDatabase(context.databases), recipe.pollId);
+    const t = await context.i18n.translatorForIdentity(owner.actorIdentityId, owner.scopeId);
+    if (!aggregate) return { status: 'blocked', reason: t('official.poll-assistant.flowInvalid'), retryable: false };
+    const round = aggregate.rounds[0]!;
+    return round.publishedAt && round.pollWaMessageId
+      ? { status: 'completed', output: { pollId: recipe.pollId }, summary: t('official.poll-assistant.outcome.created', { question: aggregate.poll.definition.question, pollId: recipe.pollId }) }
+      : { status: 'pending', operationId: `${owner.runId}:${owner.operationId}`, summary: t('official.poll-assistant.outcome.publicationPending') };
+  });
+  context.router.register('poll', 'actions', pollCommand({ auditAction: 'poll-assistant.actions',
+    usage: '/poll actions <poll ID> [status|review|retry|cancel]',
+    descriptionKey: 'official.poll-assistant.outcome.help', exampleKey: 'official.poll-assistant.outcome.help.example', topicId: 'manage'
+  }), async (ctx) => pollActionsCommand(context, ctx));
   context.flowEngine.registerAssistantCommandPreparation?.('poll.create', async ({ body, context: assistant, answers }) => {
     const runtime = requireOfficialCommandRuntime(context);
     const config = parsePollAssistantConfig(await runtime.configFor(assistant.scopeId, assistant.actor.identityAddress.identityId));
@@ -435,6 +458,10 @@ async function computePollCreationCompletionDecision(input: {
     kind: 'create',
     pollId: input.recipe.pollId,
     definition,
+    ...(pollOutcomeFromFlow(input.snapshot.state) ? { outcome: freezePollOutcome(pollOutcomeFromFlow(input.snapshot.state)!, {
+      requesterIdentityId: input.recipe.actorIdentityId, requesterChatId: actor.deliveryChatId,
+      approvedAt: new Date().toISOString(), approvalSourceId: input.snapshot.id
+    }) } : {}),
     maxActivePollsPerChat: currentConfig.maxActivePollsPerChat
   });
 }
@@ -516,6 +543,7 @@ async function executePollCreationCompletionDecision(input: {
   }
   try {
     createPoll(input.db, {
+      ...(input.decision.outcome ? { outcome: input.decision.outcome } : {}),
       definition: input.decision.definition,
       scopeId: input.recipe.scopeId,
       chatId: input.recipe.originGroupWid,
