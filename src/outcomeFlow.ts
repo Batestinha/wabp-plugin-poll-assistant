@@ -27,7 +27,8 @@ export function attachPollOutcomeFlow(definition: FlowDefinition, engine: FlowEn
     groupWid: recipe.originGroupWid, ...(recipe.originGroupId ? { groupId: recipe.originGroupId } : {}) };
   const tr = (name: string, params: Record<string, string | number> = {}) => t(`official.poll-assistant.outcome.${name}`, params);
   const preset = recipe.preferences.preset?.outcome;
-  const program = (state: FlowState): WorkflowProgram => value<WorkflowProgram>(state, 'save') ?? preset?.program ?? { version: 1, nodes: [] };
+  const program = (state: FlowState): WorkflowProgram => picked(state, 'enabled') === 'preset'
+    ? preset!.program : value<WorkflowProgram>(state, 'save') ?? { version: 1, nodes: [] };
   const choices = (name: string, options: { value: string; label: string }[], next?: string): FlowStep => ({ id: key(name), kind: 'choice',
     prompt: tr(`flow.${name}`), options, minSelections: 1, maxSelections: 1, ...(next ? { nextStepId: key(next) } : {}) });
   const textStep = (name: string, next: string, prompt: (state: FlowState) => string,
