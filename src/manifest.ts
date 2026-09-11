@@ -101,12 +101,13 @@ export const pollAssistantManifest: PluginManifest = {
         titleKey: 'official.poll-assistant.help.close',
         summaryKey: 'official.poll-assistant.help.cancel',
         order: 30,
-        commands: ['/poll open', '/poll close', '/poll cancel', '/poll resolve'],
+        commands: ['/poll open', '/poll close', '/poll cancel', '/poll resolve', '/poll actions'],
         exampleKeys: [
           'official.poll-assistant.help.open.example',
           'official.poll-assistant.help.close.example',
           'official.poll-assistant.help.cancel.example',
-          'official.poll-assistant.help.resolve.example'
+          'official.poll-assistant.help.resolve.example',
+          'official.poll-assistant.outcome.help.example'
         ],
         keywords: ['poll', 'open', 'close', 'cancel', 'resolve', 'tie'],
         availability: {

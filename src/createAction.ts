@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { PluginServiceRegistrationContext } from '../../../platform/pluginRuntime/types';
 import type { PluginServiceRegistration, PluginServiceCallContext } from '../../../platform/pluginRuntime/pluginServices';
+import { pluginWorkflowGroupCapabilities } from '../../../platform/pluginRuntime/workflowContext';
 import { canonicalJson, workflowDigest, preparedActionSchema, workflowActionResultSchema, type WorkflowActionResult, type WorkflowProgram } from '../../../platform/workflows/contracts';
 import { parsePollAssistantConfig } from './config';
 import { POLL_CREATE_ACTION_SERVICE, pollCreateAction, pollCreateActionInputSchema } from './createActionApi';
@@ -96,7 +97,7 @@ async function requester(context: PluginServiceRegistrationContext, call: Plugin
     groupWid, ...(call.groupId ? { groupId: call.groupId } : {}), requiresCurrentManagedGroupMembership: true, currentManagedGroupMembershipMode: 'effective_scope',
     ...(config.allowMemberCreation ? { allowCurrentManagedGroupMember: true } : {}) });
   if (!permission?.allowed) throw new Error(t('official.poll-assistant.permissionDenied'));
-  const caps = await context.platform.transport.getGroupCapabilities(groupWid);
+  const caps = await pluginWorkflowGroupCapabilities(context, groupWid);
   if (!caps.botIsAdmin || !caps.canSend) throw new Error(t('official.poll-assistant.botCapabilityUnavailable'));
   const closing = input?.definition.closing;
   if (closing?.kind === 'deadline') {
