@@ -3901,9 +3901,13 @@ export function ensurePollLifecycleDelivery(db: PluginDatabase, input: {
   roundId: string;
   delivery: PollDeliveryIntent;
   createdAt: string;
+  activationAnnouncementEnabled?: boolean | undefined;
+  reuseExistingAnnouncement?: boolean | undefined;
 }): StoredPollDelivery {
   const createdAt = timestampSchema.parse(input.createdAt);
   validateDeliveryIntent(input.delivery);
+  if (input.activationAnnouncementEnabled !== undefined && input.delivery.kind !== 'announcement') throw new Error('Only a publication can capture its activation announcement policy');
+  if (input.reuseExistingAnnouncement && !['announcement', 'activation'].includes(input.delivery.kind)) throw new Error('Frozen announcement reuse is only valid for announcements');
   return db.transaction(() => {
     const existing = getPollDelivery(db, input.delivery.id);
     if (existing) {
@@ -3913,8 +3917,8 @@ export function ensurePollLifecycleDelivery(db: PluginDatabase, input: {
         || existing.kind !== input.delivery.kind
         || existing.deliveryKey !== input.delivery.deliveryKey
         || existing.chatId !== input.delivery.chatId
-        || existing.text !== input.delivery.text
-        || JSON.stringify(normalizedMentionRecipients(existing.mentionedWids)) !== JSON.stringify(normalizedMentionRecipients(input.delivery.mentionedWids))
+        || (!input.reuseExistingAnnouncement && (existing.text !== input.delivery.text
+          || JSON.stringify(normalizedMentionRecipients(existing.mentionedWids)) !== JSON.stringify(normalizedMentionRecipients(input.delivery.mentionedWids))))
         || existing.idempotencyKey !== input.delivery.idempotencyKey
         || existing.deliveryBatchKey !== input.delivery.deliveryBatchKey
         || existing.deliverySequence !== input.delivery.deliverySequence
@@ -3927,6 +3931,7 @@ export function ensurePollLifecycleDelivery(db: PluginDatabase, input: {
       throw new PollActivationAnnouncementSuppressedError(input.roundId);
     }
     insertDelivery(db, input.pollId, input.roundId, input.delivery, createdAt);
+    if (input.activationAnnouncementEnabled === false) suppressPollActivationAnnouncement(db, input.roundId, createdAt);
     return getPollDelivery(db, input.delivery.id)!;
   });
 }

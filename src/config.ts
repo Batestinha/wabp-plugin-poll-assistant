@@ -1,3 +1,4 @@
+import { pollMessageSettingsSchema, validatePollMessageSettings } from './templates';
 import { z } from 'zod';
 import { pollOutcomePresetSchema } from './outcomeConfig';
 import { pollAssistantWorkingHoursSchema } from './workingHours';
@@ -124,6 +125,7 @@ const ianaTimezoneSchema = z.string().trim().min(1).refine((value) => {
 }, 'Must be a valid IANA timezone');
 
 const pollAssistantConfigObjectSchema = z.object({
+  messages: pollMessageSettingsSchema,
   allowCreation: z.boolean().default(true),
   allowMemberCreation: z.boolean().default(true),
   timezone: ianaTimezoneSchema.default('UTC'),
@@ -179,10 +181,13 @@ const pollAssistantConfigObjectSchema = z.object({
   }
 });
 
-export const pollAssistantConfigSchema = pollAssistantConfigObjectSchema.default({});
+export const pollAssistantRuntimeConfigSchema = pollAssistantConfigObjectSchema.default({});
+export const pollAssistantConfigSchema = pollAssistantConfigObjectSchema.superRefine((config, ctx) => {
+  validatePollMessageSettings(config.messages, ctx);
+}).default({});
 
 export type PollAssistantConfig = z.infer<typeof pollAssistantConfigSchema>;
 
 export function parsePollAssistantConfig(input: unknown): PollAssistantConfig {
-  return pollAssistantConfigSchema.parse(input ?? {});
+  return pollAssistantRuntimeConfigSchema.parse(input ?? {});
 }

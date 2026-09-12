@@ -1,3 +1,4 @@
+import { pollTemplateDefinitions, pollTemplateSamples, POLL_TEMPLATE_MAX_LENGTH } from './templates';
 import { defineControl } from '../../../platform/operatorConsole/controlCatalog/define';
 import type {
   ControlDescriptor,
@@ -61,6 +62,22 @@ const QUORUM_MODE_OPTIONS = [
 ];
 
 export const pollAssistantControls: ControlDescriptor[] = [
+  ...Object.entries(pollTemplateDefinitions).map(([kind, definition], index) => control(
+    `messages.${kind}`, definition.title,
+    'Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.',
+    500 + index,
+    { type: 'string', max: POLL_TEMPLATE_MAX_LENGTH },
+    {
+      widget: 'text', multiline: true,
+      templateDialect: 'conditional-presence-v1', templateActivation: 'always', templateEmptyResult: 'reject',
+      templateVariables: definition.tokens.map((token) => ({ token, label: token.replace(/([A-Z])/g, ' $1').replace(/^./, (letter) => letter.toUpperCase()), sampleValue: pollTemplateSamples[token] ?? '' })),
+      templateConditionVariables: definition.tokens.map((token) => ({ token, label: token.replace(/([A-Z])/g, ' $1').replace(/^./, (letter) => letter.toUpperCase()), sampleValue: pollTemplateSamples[token] ?? '' })),
+      placeholder: definition.source
+    },
+    'Messages'
+  )),
+  control('messages.activationEnabled', 'Announce activation', 'Send a separate closing-time announcement after activation. New announcements are disabled by default.', 520, { type: 'boolean' }, { widget: 'toggle' }, 'Messages'),
+  control('messages.mentionEligible', 'Notify eligible voters', 'Include actual mentions of eligible voters in new publication announcements, excluding the bot.', 521, { type: 'boolean' }, { widget: 'toggle' }, 'Messages'),
   control(
     'allowCreation',
     'Accept new polls',

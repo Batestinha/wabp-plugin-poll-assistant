@@ -1,8 +1,10 @@
+import { pollTemplateDefaultMessages } from './templates';
 import type { MessageCatalog } from '../../../platform/i18n';
 import { pollOutcomeMessages } from './outcomeMessages';
 
 export const pollAssistantMessages: MessageCatalog = {
   ...pollOutcomeMessages,
+  ...pollTemplateDefaultMessages,
   'official.poll-assistant.description': 'Create, publish, close, and interpret durable WhatsApp polls.',
   'official.poll-assistant.assistant.summary': 'Guided durable WhatsApp polls with operator presets, aggregate results, and confirmed lifecycle management.',
   'official.poll-assistant.assistant.workflow.create': 'Start the guided Decide, Measure, or Tally setup flow, using an operator-selected poll preset when available.',

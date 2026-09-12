@@ -1,6 +1,6 @@
 import type { PluginManifest } from '../../../platform/pluginRuntime/manifest';
 import { POLL_HISTORY_OWNED_DATA_RESOURCE } from '../../../platform/pluginRuntime/pluginOwnedData';
-import { pollAssistantConfigSchema } from './config';
+import { pollAssistantConfigSchema, pollAssistantRuntimeConfigSchema } from './config';
 import {
   POLL_ASSISTANT_PLUGIN_ID,
   pollAssistantDatabases
@@ -37,8 +37,8 @@ import {
 export const pollAssistantManifest: PluginManifest = {
   pluginId: POLL_ASSISTANT_PLUGIN_ID,
   kind: 'managed_group',
-  version: '0.4.1',
-  coreApiRange: '>=0.2.0',
+  version: '0.4.2',
+  coreApiRange: '^0.3.0',
   messageNamespace: 'official.poll-assistant',
   descriptionKey: 'official.poll-assistant.description',
   defaultMessages: pollAssistantMessages,
@@ -160,6 +160,8 @@ export const pollAssistantManifest: PluginManifest = {
   ],
   requiredBotCapabilities: [],
   configSchema: pollAssistantConfigSchema,
+  runtimeConfigSchema: pollAssistantRuntimeConfigSchema,
+  scopeClock: { timezoneConfigPaths: ['timezone'] },
   dangerousActions: [],
   backgroundJobs: [
     POLL_PUBLISH_JOB,
