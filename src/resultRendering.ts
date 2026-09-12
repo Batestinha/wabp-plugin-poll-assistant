@@ -1,4 +1,4 @@
-import type { TranslateFn } from '../../../platform/i18n/types';
+import type { TranslateFn } from '../../../../packages/plugin-sdk/src/i18n';
 import type { PollBallot, PollDefinition, PollElector, PollResult } from './domain';
 import { describePollRandomDraw } from './resultCalculator';
 import { paginatePollText, renderPollTemplate, type PollTemplateKind, type PollTemplateOverrides } from './templates';

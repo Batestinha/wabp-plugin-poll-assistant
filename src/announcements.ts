@@ -1,5 +1,5 @@
-import type { TranslateFn } from '../../../platform/i18n';
-import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
+import { type TranslateFn } from '../../../../packages/plugin-sdk/src/i18n';
+import type { PluginRuntimeContext } from './runtime';
 import { parsePollAssistantConfig, type PollAssistantConfig } from './config';
 import { renderPollTemplate } from './templates';
 import type { PollDefinition } from './domain';
@@ -282,5 +282,5 @@ function formatTimestamp(value: string, timezone: string, locale: string): strin
 
 type PollAnnouncementContext = Pick<
   PluginRuntimeContext,
-  'databases' | 'i18n' | 'configFor' | 'queue' | 'getCurrentBotWid' | 'resolveIdentityAddress'
+  'databases' | 'i18n' | 'configFor' | 'pluginId' | 'enqueuePluginJob' | 'getCurrentBotWid' | 'resolveIdentityAddress'
 >;

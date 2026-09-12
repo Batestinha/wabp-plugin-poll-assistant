@@ -1,10 +1,10 @@
-import type { FlowEngine } from '../../../adminBot/flows/flowEngine';
-import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
-import type { PluginCommandContext } from '../../../platform/pluginRuntime/types';
-import type { CommandContext } from '../../../adminBot/router/commandRouter';
-import type { TranslateFn } from '../../../platform/i18n';
-import type { WorkflowRunRecord } from '../../../platform/workflows/store';
-import { workflowDigest, type WorkflowPrincipal } from '../../../platform/workflows/contracts';
+import { type DurableFlowEngine as FlowEngine } from '../../../../packages/plugin-sdk/src/durable-flow';
+import type { PluginRuntimeContext } from './runtime';
+import { type PluginCommandContext } from './runtime';
+import type { CommandContext } from '../../../../packages/plugin-sdk/src/commands';
+import { type TranslateFn } from '../../../../packages/plugin-sdk/src/i18n';
+import type { WorkflowRunRecord } from '../../../../packages/plugin-sdk/src/workflow-store';
+import { workflowDigest, type WorkflowPrincipal } from '../../../../packages/plugin-sdk/src/workflows';
 import { getPollOutcomeConfiguration, listPollOutcomeHandoffs } from './outcomeStore';
 import { getPollAggregate, ensurePollLifecycleDelivery, pollsDatabase } from './store';
 import { enqueuePollDeliveryJob } from './jobs';

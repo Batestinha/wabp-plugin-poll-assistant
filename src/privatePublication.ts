@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
-import { isPluginServiceNotInvokedError } from '../../../platform/pluginRuntime/pluginServices';
+import type { PluginRuntimeContext } from './runtime';
+import { isPluginServiceNotInvokedError } from '../../../../packages/plugin-sdk/src/services';
 import {
   findTransportRateLimitError,
   isDefinitelyNotSentTransportError,
   isTransportProviderUnavailableError
-} from '../../../platform/transport/transportErrors';
+} from '../../../../packages/plugin-sdk/src/transport-errors';
 import {
   DOAS_PRIVATE_POLL_PUBLISH_METHOD,
   DOAS_PRIVATE_POLL_RECONCILE_METHOD,
@@ -14,7 +14,7 @@ import {
   doasPrivatePollReconcileInputSchema,
   type DoasPrivatePollPublishOutput,
   type DoasPrivatePollReconcileOutput
-} from '../doas/serviceApi';
+} from './contracts/doas-poll-v1';
 import { enqueuePollPrivateIssueJob, pollRetryAt } from './jobs';
 import { deliverPollPrivatePublicationAudit } from './privatePublicationAudit';
 import {

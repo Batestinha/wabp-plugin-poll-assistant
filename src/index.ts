@@ -1,4 +1,4 @@
-import type { BotPlugin } from '../../../platform/pluginRuntime/types';
+import { type BotPlugin } from './runtime';
 import {
   registerPollAssistantCancellations,
   registerPollAssistantCommands

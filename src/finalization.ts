@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
+import type { PluginRuntimeContext } from './runtime';
 import { mapAuthoritativePollReadback } from './authoritativeReadback';
 import type { PollBallotMappingTarget } from './ballotMapping';
 import type { PollReadbackBallot } from './domain';
@@ -10,7 +10,7 @@ import {
   DOAS_PRIVATE_POLL_SERVICE_ID,
   doasPrivatePollReconcileInputSchema,
   type DoasPrivatePollReconcileOutput
-} from '../doas/serviceApi';
+} from './contracts/doas-poll-v1';
 import { enqueuePollDeliveryJob, enqueuePollFinalizeJob, pollRetryAt } from './jobs';
 import { calculatePollResult } from './resultCalculator';
 import { renderPollResultMessages } from './resultRendering';

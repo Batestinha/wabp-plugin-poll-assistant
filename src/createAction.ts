@@ -1,8 +1,8 @@
 import { z } from 'zod';
-import type { PluginServiceRegistrationContext } from '../../../platform/pluginRuntime/types';
-import type { PluginServiceRegistration, PluginServiceCallContext } from '../../../platform/pluginRuntime/pluginServices';
-import { pluginWorkflowGroupCapabilities } from '../../../platform/pluginRuntime/workflowContext';
-import { canonicalJson, workflowDigest, preparedActionSchema, workflowActionResultSchema, type WorkflowActionResult, type WorkflowProgram } from '../../../platform/workflows/contracts';
+import { type PluginServiceRegistrationContext } from './runtime';
+import type { PluginServiceRegistration, PluginServiceCallContext } from '../../../../packages/plugin-sdk/src/services';
+import { pluginWorkflowGroupCapabilities } from '../../../../packages/plugin-sdk/src/durable-plugin';
+import { canonicalJson, workflowDigest, preparedActionSchema, workflowActionResultSchema, type WorkflowActionResult, type WorkflowProgram } from '../../../../packages/plugin-sdk/src/workflows';
 import { parsePollAssistantConfig } from './config';
 import { POLL_CREATE_ACTION_SERVICE, pollCreateAction, pollCreateActionInputSchema } from './createActionApi';
 import { createPoll, getPollAggregate, pollsDatabase } from './store';

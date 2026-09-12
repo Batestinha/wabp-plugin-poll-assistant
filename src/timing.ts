@@ -1,4 +1,4 @@
-import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
+import type { PluginRuntimeContext } from './runtime';
 import { ensurePollActivationAnnouncement, ensurePollPublicationAnnouncement } from './announcements';
 import { enqueuePollActivateJob, enqueuePollFinalizeJob } from './jobs';
 import {
@@ -8,7 +8,7 @@ import {
 } from './store';
 
 export async function reconcilePollRoundTiming(
-  context: Pick<PluginRuntimeContext, 'databases' | 'i18n' | 'configFor' | 'queue'>,
+  context: Pick<PluginRuntimeContext, 'databases' | 'i18n' | 'configFor' | 'pluginId' | 'enqueuePluginJob'>,
   roundId: string,
   now = new Date()
 ): Promise<void> {

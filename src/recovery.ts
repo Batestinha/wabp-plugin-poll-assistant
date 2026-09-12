@@ -1,4 +1,4 @@
-import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
+import type { PluginRuntimeContext } from './runtime';
 import { recoverPollOutcomes } from './outcomes';
 import { cleanupPollBallots } from './delivery';
 import type { PollElector } from './domain';

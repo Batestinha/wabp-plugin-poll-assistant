@@ -4,7 +4,7 @@ import {
   WHATSAPP_POLL_MIN_OPTIONS,
   numberPollOptions,
   validatePollContent
-} from '../../../platform/transport/pollContract';
+} from '../../../../packages/plugin-sdk/src/poll-contract';
 
 export const POLL_ASSISTANT_SCHEMA_VERSION = 1 as const;
 

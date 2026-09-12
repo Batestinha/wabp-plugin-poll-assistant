@@ -1,16 +1,16 @@
 import { randomUUID } from 'node:crypto';
-import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
+import type { PluginRuntimeContext } from './runtime';
 import {
   isDefinitelyNotSentTransportError,
   isTransportProviderUnavailableError
-} from '../../../platform/transport/transportErrors';
+} from '../../../../packages/plugin-sdk/src/transport-errors';
 import { parsePollAssistantConfig } from './config';
 import {
   DOAS_PRIVATE_POLL_RELEASE_METHOD,
   DOAS_PRIVATE_POLL_SERVICE_ID,
   doasPrivatePollReleaseInputSchema,
   type DoasPrivatePollReleaseOutput
-} from '../doas/serviceApi';
+} from './contracts/doas-poll-v1';
 import { enqueuePollCleanupJob, enqueuePollDeliveryJob, pollRetryAt } from './jobs';
 import {
   POLL_DELIVERY_LEASE_MS,

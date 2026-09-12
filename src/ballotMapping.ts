@@ -1,11 +1,11 @@
-import { equivalentWhatsAppMessageIds } from '../../../platform/transport/messageIds';
+import { equivalentWhatsAppMessageIds } from '../../../../packages/plugin-sdk/src/message-ids';
 import {
   numberPollOptions,
   WHATSAPP_POLL_MAX_OPTIONS,
   WHATSAPP_POLL_MIN_OPTIONS
-} from '../../../platform/transport/pollContract';
-import type { PollVoteSnapshot } from '../../../platform/transport/transportTypes';
-import type { PluginPollVote } from '../../../platform/pluginRuntime/types';
+} from '../../../../packages/plugin-sdk/src/poll-contract';
+import type { PollVoteSnapshot } from '../../../../packages/plugin-sdk/src/transport';
+import { type PluginPollVote } from '../../../../packages/plugin-sdk/src/hooks';
 import {
   pollBallotSchema,
   pollReadbackBallotSchema,

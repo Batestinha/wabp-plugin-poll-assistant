@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
-import { isPluginServiceNotInvokedError } from '../../../platform/pluginRuntime/pluginServices';
+import type { PluginRuntimeContext } from './runtime';
+import { isPluginServiceNotInvokedError } from '../../../../packages/plugin-sdk/src/services';
 import {
   isDefinitelyNotSentTransportError,
   isTransportProviderUnavailableError,
   TransportGroupNotFoundError
-} from '../../../platform/transport/transportErrors';
+} from '../../../../packages/plugin-sdk/src/transport-errors';
 import {
   DOAS_POLL_PUBLISH_METHOD,
   DOAS_POLL_RECONCILE_METHOD,
@@ -15,7 +15,7 @@ import {
   doasPollReconcileInputSchema,
   type DoasPollPublishOutput,
   type DoasPollReconcileOutput
-} from '../doas/serviceApi';
+} from './contracts/doas-poll-v1';
 import type { PollElector } from './domain';
 import { parsePollAssistantConfig } from './config';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';

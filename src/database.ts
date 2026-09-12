@@ -1,8 +1,8 @@
-import type { PluginDatabaseManifest } from '../../../platform/pluginRuntime/manifest';
+import type { PluginDatabaseManifest } from '../../../../packages/plugin-sdk/src/manifest';
 import type {
   PluginDatabase,
   PluginDatabaseRegistry
-} from '../../../platform/pluginRuntime/runtime/pluginDatabase';
+} from '../../../../packages/plugin-sdk/src/database';
 
 export const POLL_ASSISTANT_PLUGIN_ID = 'official.poll-assistant';
 export const POLL_ASSISTANT_DATABASE = 'polls';

@@ -1,15 +1,12 @@
 import { createHash } from 'node:crypto';
 import { attachPollOutcomeFlow } from './outcomeFlow';
 import { z } from 'zod';
-import type {
-  FlowEngine,
-  FlowSessionSnapshot,
-  FlowStartOrigin,
-  FlowStartResult
-} from '../../../adminBot/flows/flowEngine';
-import type { I18nService, LanguagePackScope, TranslateFn } from '../../../platform/i18n';
-import type { StableIdentityAddressResolution } from '../../../platform/identity/identityAddressService';
-import type { PrivateDeliveryFallback } from '../../../platform/transport/transportTypes';
+import { type DurableFlowEngine as FlowEngine } from '../../../../packages/plugin-sdk/src/durable-flow';
+import { type FlowSessionSnapshot, type FlowStartOrigin, type FlowStartResult } from '../../../../packages/plugin-sdk/src/flow-engine';
+import { type PluginScopedI18n as I18nService } from '../../../../packages/plugin-sdk/src/durable-plugin';
+import { type LanguagePackScope, type TranslateFn } from '../../../../packages/plugin-sdk/src/i18n';
+import type { StableIdentityAddressResolution } from '../../../../packages/plugin-sdk/src/identity';
+import type { PrivateDeliveryFallback } from '../../../../packages/plugin-sdk/src/transport';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';
 import { pollCreationPresetSchema } from './config';
 import {

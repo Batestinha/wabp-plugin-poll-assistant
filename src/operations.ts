@@ -1,6 +1,7 @@
-import type { PluginDatabaseRegistry } from '../../../platform/pluginRuntime/runtime/pluginDatabase';
-import type { PluginCommandContext } from '../../../platform/pluginRuntime/types';
-import type { MessageActor } from '../../../platform/identity/messageActor';
+import type { PluginJobContext } from '../../../../packages/plugin-sdk/src/jobs';
+import type { PluginDatabaseRegistry } from '../../../../packages/plugin-sdk/src/database';
+import { type PluginCommandContext } from './runtime';
+import type { MessageActor } from '../../../../packages/plugin-sdk/src/message-actor';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';
 import { enqueuePollFinalizeJob } from './jobs';
 import {
@@ -94,7 +95,7 @@ export type PollCloseRequestResult =
   | { kind: 'not_open' };
 
 export async function requestPollClose(input: {
-  context: Pick<PluginCommandContext, 'queue'>;
+  context: PluginJobContext;
   databases: PluginDatabaseRegistry | undefined;
   aggregate: StoredPollAggregate;
   requestedAt?: Date | undefined;

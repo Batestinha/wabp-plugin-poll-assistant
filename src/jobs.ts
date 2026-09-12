@@ -1,5 +1,6 @@
-import { enqueuePluginJob } from '../../../platform/jobs/queue';
-import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
+import type { PluginJobContext } from '../../../../packages/plugin-sdk/src/jobs';
+import { enqueuePluginJob } from '../../../../packages/plugin-sdk/src/jobs';
+import type { PluginRuntimeContext } from './runtime';
 import { z } from 'zod';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';
 
@@ -30,7 +31,7 @@ export const pollPrivateIssueJobPayloadSchema = z.object({
 }).strict();
 
 export async function enqueuePollPublishJob(
-  context: Pick<PluginRuntimeContext, 'queue'>,
+  context: PluginJobContext,
   input: {
     scopeId: string;
     pollId: string;
@@ -41,7 +42,7 @@ export async function enqueuePollPublishJob(
     runAt?: Date | undefined;
   }
 ): Promise<void> {
-  await enqueuePluginJob(context.queue, {
+  await enqueuePluginJob(context, {
     pluginId: POLL_ASSISTANT_PLUGIN_ID,
     jobName: POLL_PUBLISH_JOB,
     scopeId: input.scopeId,
@@ -59,7 +60,7 @@ export async function enqueuePollPublishJob(
 }
 
 export async function enqueuePollFinalizeJob(
-  context: Pick<PluginRuntimeContext, 'queue'>,
+  context: PluginJobContext,
   input: {
     scopeId: string;
     pollId: string;
@@ -70,7 +71,7 @@ export async function enqueuePollFinalizeJob(
     runAt?: Date | undefined;
   }
 ): Promise<void> {
-  await enqueuePluginJob(context.queue, {
+  await enqueuePluginJob(context, {
     pluginId: POLL_ASSISTANT_PLUGIN_ID,
     jobName: POLL_FINALIZE_JOB,
     scopeId: input.scopeId,
@@ -88,7 +89,7 @@ export async function enqueuePollFinalizeJob(
 }
 
 export async function enqueuePollActivateJob(
-  context: Pick<PluginRuntimeContext, 'queue'>,
+  context: PluginJobContext,
   input: {
     scopeId: string;
     pollId: string;
@@ -99,7 +100,7 @@ export async function enqueuePollActivateJob(
     runAt: Date;
   }
 ): Promise<void> {
-  await enqueuePluginJob(context.queue, {
+  await enqueuePluginJob(context, {
     pluginId: POLL_ASSISTANT_PLUGIN_ID,
     jobName: POLL_ACTIVATE_JOB,
     scopeId: input.scopeId,
@@ -117,7 +118,7 @@ export async function enqueuePollActivateJob(
 }
 
 export async function enqueuePollDeliveryJob(
-  context: Pick<PluginRuntimeContext, 'queue'>,
+  context: PluginJobContext,
   input: {
     scopeId: string;
     deliveryId: string;
@@ -127,7 +128,7 @@ export async function enqueuePollDeliveryJob(
     runAt?: Date | undefined;
   }
 ): Promise<void> {
-  await enqueuePluginJob(context.queue, {
+  await enqueuePluginJob(context, {
     pluginId: POLL_ASSISTANT_PLUGIN_ID,
     jobName: POLL_DELIVER_JOB,
     scopeId: input.scopeId,
@@ -140,7 +141,7 @@ export async function enqueuePollDeliveryJob(
 }
 
 export async function enqueuePollCleanupJob(
-  context: Pick<PluginRuntimeContext, 'queue'>,
+  context: PluginJobContext,
   input: {
     scopeId: string;
     pollId: string;
@@ -149,7 +150,7 @@ export async function enqueuePollCleanupJob(
     runAt: Date;
   }
 ): Promise<void> {
-  await enqueuePluginJob(context.queue, {
+  await enqueuePluginJob(context, {
     pluginId: POLL_ASSISTANT_PLUGIN_ID,
     jobName: POLL_CLEANUP_JOB,
     scopeId: input.scopeId,
@@ -162,7 +163,7 @@ export async function enqueuePollCleanupJob(
 }
 
 export async function enqueuePollPrivateIssueJob(
-  context: Pick<PluginRuntimeContext, 'queue'>,
+  context: PluginJobContext,
   input: {
     scopeId: string;
     issuanceId: string;
@@ -173,7 +174,7 @@ export async function enqueuePollPrivateIssueJob(
     replaceRetainedTerminalJob?: boolean | undefined;
   }
 ): Promise<void> {
-  await enqueuePluginJob(context.queue, {
+  await enqueuePluginJob(context, {
     pluginId: POLL_ASSISTANT_PLUGIN_ID,
     jobName: POLL_PRIVATE_ISSUE_JOB,
     scopeId: input.scopeId,

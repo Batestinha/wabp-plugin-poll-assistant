@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "contracts": [
+    {
+      "id": "official.doas.poll.v1",
+      "repository": "https://github.com/Batestinha/wabp",
+      "commit": "6118a774d8e1b0a7b13420b1b665c91c3c5a6617",
+      "path": "src/plugins/official/doas/serviceApi.ts",
+      "upstreamSha256": "50f40776b81ebbeed7b93d31a9fe8b43158d1c2748f044f31c1d64949b2a9d3f",
+      "vendoredPath": "doas-poll-v1.ts",
+      "vendoredSha256": "50f40776b81ebbeed7b93d31a9fe8b43158d1c2748f044f31c1d64949b2a9d3f",
+      "patches": [],
+      "license": "MIT",
+      "licenseFile": "LICENSE.doas",
+      "containsProviderImplementation": false
+    }
+  ]
+}

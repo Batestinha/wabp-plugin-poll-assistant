@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import type { TranslateFn } from '../../../platform/i18n/types';
-import { renderConditionalTemplate, validateConditionalTemplate } from '../../../platform/templates/conditionalTemplate';
+import type { TranslateFn } from '../../../../packages/plugin-sdk/src/i18n';
+import { renderConditionalTemplate, validateConditionalTemplate } from '../../../../packages/plugin-sdk/src/templates';
 
 const contextTokens = ['pollId', 'question', 'timezone', 'cutoffAt'];
 const outcomeTokens = [...contextTokens, 'options', 'certainOptions', 'tiedOptions', 'remainingSeats', 'medianOptions', 'modeOptions', 'total', 'unit'];

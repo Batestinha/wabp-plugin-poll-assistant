@@ -6,10 +6,10 @@ import type {
   PluginDatabase,
   PluginDatabaseRegistry,
   PluginDatabaseRow
-} from '../../../platform/pluginRuntime/runtime/pluginDatabase';
-import { numberPollOptions } from '../../../platform/transport/pollContract';
-import { equivalentWhatsAppMessageIds } from '../../../platform/transport/messageIds';
-import { comparePollVoteRevisions } from '../../../platform/transport/pollVoteOrdering';
+} from '../../../../packages/plugin-sdk/src/database';
+import { numberPollOptions } from '../../../../packages/plugin-sdk/src/poll-contract';
+import { equivalentWhatsAppMessageIds } from '../../../../packages/plugin-sdk/src/message-ids';
+import { comparePollVoteRevisions } from '../../../../packages/plugin-sdk/src/poll-ordering';
 import { pollAssistantDatabase } from './database';
 import {
   pollAllowsMultipleAnswers,

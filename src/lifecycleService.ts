@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import type { PluginServiceRegistration } from '../../../platform/pluginRuntime/pluginServices';
-import type { PluginServiceRegistrationContext } from '../../../platform/pluginRuntime/types';
+import type { PluginServiceRegistration } from '../../../../packages/plugin-sdk/src/services';
+import { type PluginServiceRegistrationContext } from './runtime';
 import { parsePollAssistantConfig } from './config';
 import { enqueuePollDeliveryJob, enqueuePollPublishJob } from './jobs';
 import {

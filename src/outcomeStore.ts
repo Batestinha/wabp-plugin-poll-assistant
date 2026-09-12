@@ -1,5 +1,5 @@
-import type { PluginDatabase } from '../../../platform/pluginRuntime/runtime/pluginDatabase';
-import { canonicalJson, workflowDigest } from '../../../platform/workflows/contracts';
+import type { PluginDatabase } from '../../../../packages/plugin-sdk/src/database';
+import { canonicalJson, workflowDigest } from '../../../../packages/plugin-sdk/src/workflows';
 import { frozenPollOutcomeSchema, pollOutcomeResult, type FrozenPollOutcome } from './outcomeConfig';
 import type { PollResult } from './domain';
 

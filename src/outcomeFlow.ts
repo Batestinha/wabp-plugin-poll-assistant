@@ -1,9 +1,9 @@
-import type { FlowDefinition, FlowState, FlowStep } from '../../../adminBot/flows/flowTypes';
-import type { FlowEngine } from '../../../adminBot/flows/flowEngine';
-import type { TranslateFn } from '../../../platform/i18n';
-import type { WorkflowNode, WorkflowProgram, WorkflowPrincipal } from '../../../platform/workflows/contracts';
-import { workflowProgramSchema } from '../../../platform/workflows/contracts';
-import { workflowFormFields, parseWorkflowFormValue, setWorkflowFormValue, type WorkflowFormField } from '../../../platform/workflows/form';
+import type { FlowDefinition, FlowState, FlowStep } from '../../../../packages/plugin-sdk/src/flow-types';
+import { type DurableFlowEngine as FlowEngine } from '../../../../packages/plugin-sdk/src/durable-flow';
+import { type TranslateFn } from '../../../../packages/plugin-sdk/src/i18n';
+import type { WorkflowNode, WorkflowProgram, WorkflowPrincipal } from '../../../../packages/plugin-sdk/src/workflows';
+import { workflowProgramSchema } from '../../../../packages/plugin-sdk/src/workflows';
+import { workflowFormFields, parseWorkflowFormValue, setWorkflowFormValue, type WorkflowFormField } from '../../../../packages/plugin-sdk/src/workflow-form';
 import { canonicalPollOutcomeProgram, pollOutcomeConfigurationSchema, renderPollOutcomeProgram, pollOutcomeResultSchema, type PollOutcomeConfiguration } from './outcomeConfig';
 import { pollCreationAnswers, pollDefinitionFromCreationAnswers } from './flow';
 import type { PollCreationRecipe } from './flowStarter';

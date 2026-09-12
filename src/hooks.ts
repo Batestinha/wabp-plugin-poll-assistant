@@ -1,10 +1,5 @@
-import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
-import type {
-  PluginJobEvent,
-  PluginParticipantChangeEvent,
-  PluginPollVotePluginEvent,
-  PluginRuntimeHooks
-} from '../../../platform/pluginRuntime/types';
+import type { PluginRuntimeContext } from './runtime';
+import { type PluginJobEvent, type PluginParticipantChangeEvent, type PluginPollVotePluginEvent, type PluginRuntimeHooks } from '../../../../packages/plugin-sdk/src/hooks';
 import { PollBallotMappingError, mapPluginPollVoteToBallot } from './ballotMapping';
 import { parsePollAssistantConfig } from './config';
 import { cleanupPollBallots, deliverPollMessage } from './delivery';

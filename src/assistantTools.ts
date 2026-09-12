@@ -4,8 +4,8 @@ import {
   throwIfAborted,
   type AssistantTool,
   type AssistantToolContext
-} from '../../../platform/nlAssistant';
-import type { PluginCommandContext } from '../../../platform/pluginRuntime/types';
+} from '../../../../packages/plugin-sdk/src/assistant-tools';
+import { type PluginCommandContext } from './runtime';
 import { parsePollAssistantConfig } from './config';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';
 import { pollResultSchema, type PollResult } from './domain';
