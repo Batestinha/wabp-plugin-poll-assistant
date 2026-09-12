@@ -64,6 +64,7 @@ export async function deliverPollMessage(
     }
     const sent = await context.sendText(claim.delivery.chatId, claim.delivery.text, {
       idempotencyKey: claim.delivery.idempotencyKey,
+      ...(claim.delivery.mentionedWids?.length ? { mentionedWids: [...claim.delivery.mentionedWids] } : {}),
       requiredProviderId: 'whatsmeow'
     });
     const messageId = sent.messageId?.trim();

@@ -6,6 +6,7 @@ import { getPollOutcomeConfiguration } from './outcomeStore';
 import { enqueuePollDeliveryJob } from './jobs';
 import {
   ensurePollLifecycleDelivery,
+  PollActivationAnnouncementSuppressedError,
   getPollDelivery,
   getPollLifecycleByRoundId,
   pollsDatabase,
@@ -21,6 +22,8 @@ export async function ensurePollPublicationAnnouncement(
   if (!snapshot?.round.publishedAt || !snapshot.round.announcementsRequired) {
     return false;
   }
+  const existingDelivery = getPollDelivery(pollsDatabase(context.databases), `poll-announcement:${roundId}:published`);
+  if (existingDelivery) return enqueueStoredAnnouncement(context, snapshot, existingDelivery);
   const t = await context.i18n.translatorForScope(snapshot.poll.scopeId);
   const locale = (await context.i18n.resolveScopeLocale(snapshot.poll.scopeId)).locale;
   const config = parsePollAssistantConfig(await context.configFor(snapshot.poll.scopeId));
@@ -75,12 +78,17 @@ export async function ensurePollActivationAnnouncement(
   ) {
     return false;
   }
+  const existingDelivery = getPollDelivery(pollsDatabase(context.databases), `poll-announcement:${roundId}:activated`);
+  if (existingDelivery) return enqueueStoredAnnouncement(context, snapshot, existingDelivery);
+  if (snapshot.round.activationAnnouncementSuppressedAt) return false;
   const t = await context.i18n.translatorForScope(snapshot.poll.scopeId);
   const locale = (await context.i18n.resolveScopeLocale(snapshot.poll.scopeId)).locale;
   const config = parsePollAssistantConfig(await context.configFor(snapshot.poll.scopeId));
   const deliveryId = `poll-announcement:${roundId}:activated`;
   const deliveryBatchKey = `poll-announcements:${roundId}`;
-  const delivery = ensurePollLifecycleDelivery(pollsDatabase(context.databases), {
+  let delivery;
+  try {
+    delivery = ensurePollLifecycleDelivery(pollsDatabase(context.databases), {
     pollId: snapshot.poll.id,
     roundId,
     delivery: {
@@ -99,6 +107,10 @@ export async function ensurePollActivationAnnouncement(
     },
     createdAt: now.toISOString()
   });
+  } catch (error) {
+    if (error instanceof PollActivationAnnouncementSuppressedError) return false;
+    throw error;
+  }
   if (delivery.status === 'sent') {
     return false;
   }
@@ -112,6 +124,23 @@ export async function ensurePollActivationAnnouncement(
   await enqueuePollDeliveryJob(context, {
     scopeId: snapshot.poll.scopeId,
     deliveryId,
+    ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
+    groupWid: snapshot.poll.chatId,
+    attempt: delivery.attempt + 1
+  });
+  return true;
+}
+
+async function enqueueStoredAnnouncement(
+  context: PollAnnouncementContext,
+  snapshot: StoredPollRoundSnapshot,
+  delivery: NonNullable<ReturnType<typeof getPollDelivery>>
+): Promise<boolean> {
+  if (delivery.status === 'sent') return false;
+  if (delivery.kind === 'activation' && getPollDelivery(pollsDatabase(context.databases), `poll-announcement:${snapshot.round.id}:published`)?.status !== 'sent') return false;
+  await enqueuePollDeliveryJob(context, {
+    scopeId: snapshot.poll.scopeId,
+    deliveryId: delivery.id,
     ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
     groupWid: snapshot.poll.chatId,
     attempt: delivery.attempt + 1

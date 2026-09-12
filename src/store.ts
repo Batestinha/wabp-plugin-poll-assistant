@@ -126,6 +126,7 @@ export interface StoredPollRound {
   bypassWorkingHours: boolean;
   workingHoursOverrideAt?: string | undefined;
   announcementsRequired: boolean;
+  activationAnnouncementSuppressedAt?: string | undefined;
   finalizationAttempt: number;
   publicationAttempt: number;
   publicationClaimToken?: string | undefined;
@@ -227,6 +228,7 @@ export interface RecoverablePollRound {
 }
 
 export interface PollDeliveryIntent {
+  mentionedWids?: readonly string[] | undefined;
   id: string;
   kind: PollDeliveryKind;
   deliveryKey: string;
@@ -324,6 +326,7 @@ interface PollRow extends PluginDatabaseRow {
 }
 
 interface PollRoundRow extends PluginDatabaseRow {
+  activation_announcement_suppressed_at: string | null;
   id: string;
   poll_id: string;
   round_number: number;
@@ -377,6 +380,7 @@ interface BallotRow extends PluginDatabaseRow {
 }
 
 interface DeliveryRow extends PluginDatabaseRow {
+  mentioned_wids_json: string;
   id: string;
   poll_id: string;
   round_id: string;
@@ -3910,6 +3914,7 @@ export function ensurePollLifecycleDelivery(db: PluginDatabase, input: {
         || existing.deliveryKey !== input.delivery.deliveryKey
         || existing.chatId !== input.delivery.chatId
         || existing.text !== input.delivery.text
+        || JSON.stringify(normalizedMentionRecipients(existing.mentionedWids)) !== JSON.stringify(normalizedMentionRecipients(input.delivery.mentionedWids))
         || existing.idempotencyKey !== input.delivery.idempotencyKey
         || existing.deliveryBatchKey !== input.delivery.deliveryBatchKey
         || existing.deliverySequence !== input.delivery.deliverySequence
@@ -3918,9 +3923,26 @@ export function ensurePollLifecycleDelivery(db: PluginDatabase, input: {
       }
       return existing;
     }
+    if (input.delivery.kind === 'activation' && db.get<PollRoundRow>('SELECT * FROM poll_rounds WHERE id = ?', input.roundId)?.activation_announcement_suppressed_at) {
+      throw new PollActivationAnnouncementSuppressedError(input.roundId);
+    }
     insertDelivery(db, input.pollId, input.roundId, input.delivery, createdAt);
     return getPollDelivery(db, input.delivery.id)!;
   });
+}
+
+export class PollActivationAnnouncementSuppressedError extends Error {
+  constructor(roundId: string) { super(`Activation announcement suppressed for ${roundId}`); }
+}
+
+/** A single statement prevents suppression from racing with a committed delivery. */
+export function suppressPollActivationAnnouncement(db: PluginDatabase, roundId: string, now: string): boolean {
+  return db.run(
+    `UPDATE poll_rounds SET activation_announcement_suppressed_at = ?, updated_at = ?
+      WHERE id = ? AND activation_announcement_suppressed_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM poll_deliveries WHERE id = 'poll-announcement:' || poll_rounds.id || ':activated')`,
+    timestampSchema.parse(now), timestampSchema.parse(now), required(roundId, 'roundId')
+  ).changes === 1;
 }
 
 export function listPollRoundIdsMissingAnnouncements(
@@ -3944,6 +3966,7 @@ export function listPollRoundIdsMissingAnnouncements(
        JOIN polls poll ON poll.id = round.poll_id
       WHERE round.activated_at IS NOT NULL AND round.closes_at IS NOT NULL
         AND round.announcements_required = 1
+        AND round.activation_announcement_suppressed_at IS NULL
         AND round.activation_trigger_kind IN ('participant_response', 'creator_timeout')
         AND NOT EXISTS (
           SELECT 1 FROM poll_deliveries delivery
@@ -4061,8 +4084,8 @@ function insertDelivery(
     `INSERT INTO poll_deliveries (
        id, poll_id, round_id, kind, delivery_key, chat_id, text,
        idempotency_key, status, next_attempt_at, delivery_batch_key,
-       delivery_sequence, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`,
+       delivery_sequence, mentioned_wids_json, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
     delivery.id,
     pollId,
     roundId,
@@ -4074,12 +4097,21 @@ function insertDelivery(
     delivery.notBefore ?? null,
     delivery.deliveryBatchKey ?? null,
     delivery.deliverySequence ?? null,
+    JSON.stringify(normalizedMentionRecipients(delivery.mentionedWids)),
     createdAt,
     createdAt
   );
 }
 
+function normalizedMentionRecipients(value: readonly string[] | undefined): string[] {
+  return [...new Set(z.array(z.string().trim().min(1)).max(100_000).parse(value ?? []))].sort();
+}
+
 function validateDeliveryIntent(delivery: PollDeliveryIntent): void {
+  if (normalizedMentionRecipients(delivery.mentionedWids).length && delivery.kind !== 'announcement') {
+    throw new Error('Only publication announcements may notify eligible voters.');
+  }
+
   required(delivery.id, 'delivery.id');
   required(delivery.deliveryKey, 'delivery.deliveryKey');
   required(delivery.chatId, 'delivery.chatId');
@@ -4269,6 +4301,7 @@ function roundFromRow(row: PollRoundRow): StoredPollRound {
     bypassWorkingHours: row.bypass_working_hours === 1,
     ...(row.working_hours_override_at ? { workingHoursOverrideAt: row.working_hours_override_at } : {}),
     announcementsRequired: row.announcements_required === 1,
+    ...(row.activation_announcement_suppressed_at ? { activationAnnouncementSuppressedAt: row.activation_announcement_suppressed_at } : {}),
     publicationAttempt: row.publication_attempt,
     ...(row.publication_claim_token ? { publicationClaimToken: row.publication_claim_token } : {}),
     ...(row.publication_lease_expires_at
@@ -4304,7 +4337,9 @@ function electorFromRow(row: ElectorRow): PollElector {
 }
 
 function deliveryFromRow(row: DeliveryRow): StoredPollDelivery {
+  const mentionedWids = normalizedMentionRecipients(JSON.parse(row.mentioned_wids_json));
   return {
+    ...(mentionedWids.length ? { mentionedWids } : {}),
     id: row.id,
     pollId: row.poll_id,
     roundId: row.round_id,
