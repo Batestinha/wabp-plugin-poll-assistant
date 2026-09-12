@@ -1,6 +1,7 @@
 import type { TranslateFn } from '../../../platform/i18n';
 import type { PluginRuntimeContext } from '../../../platform/pluginRuntime/runtime/pluginRuntimeContext';
-import { parsePollAssistantConfig } from './config';
+import { parsePollAssistantConfig, type PollAssistantConfig } from './config';
+import { renderPollTemplate } from './templates';
 import type { PollDefinition } from './domain';
 import { getPollOutcomeConfiguration } from './outcomeStore';
 import { enqueuePollDeliveryJob } from './jobs';
@@ -8,6 +9,8 @@ import {
   ensurePollLifecycleDelivery,
   PollActivationAnnouncementSuppressedError,
   getPollDelivery,
+  getPollAggregate,
+  listPollPrivateIssuancesByRound,
   getPollLifecycleByRoundId,
   pollsDatabase,
   type StoredPollRoundSnapshot
@@ -29,36 +32,35 @@ export async function ensurePollPublicationAnnouncement(
   const config = parsePollAssistantConfig(await context.configFor(snapshot.poll.scopeId));
   const deliveryId = `poll-announcement:${roundId}:published`;
   const deliveryBatchKey = `poll-announcements:${roundId}`;
-  const delivery = ensurePollLifecycleDelivery(pollsDatabase(context.databases), {
-    pollId: snapshot.poll.id,
-    roundId,
+  const db = pollsDatabase(context.databases);
+  const outcome = getPollOutcomeConfiguration(db, snapshot.poll.id);
+  const recipients = config.messages.mentionEligible ? await publicationRecipients(context, snapshot) : [];
+  const distributing = listPollPrivateIssuancesByRound(db, roundId).some(issuance => ['pending', 'publishing'].includes(issuance.status));
+  const delivery = ensurePollLifecycleDelivery(db, {
+    pollId: snapshot.poll.id, roundId,
     delivery: {
-      id: deliveryId,
-      kind: 'announcement',
-      deliveryKey: `${deliveryId}:v1`,
-      chatId: snapshot.poll.chatId,
-      text: renderPublicationAnnouncement(snapshot, config.timezone, locale, t) + (() => {
-        const outcome = getPollOutcomeConfiguration(pollsDatabase(context.databases), snapshot.poll.id);
-        return outcome ? '\n\n' + t('official.poll-assistant.outcome.published', { summary: outcome.summary,
-          policy: t(`official.poll-assistant.outcome.policy.${outcome.policy}`) }) : '';
-      })(),
-      idempotencyKey: `poll-assistant:${deliveryId}:v1`,
-      deliveryBatchKey,
-      deliverySequence: 0
+      id: deliveryId, kind: 'announcement', deliveryKey: `${deliveryId}:v1`, chatId: snapshot.poll.chatId,
+      text: renderPublicationAnnouncement(snapshot, config, locale, t, distributing, outcome ? t('official.poll-assistant.outcome.published', {
+        summary: outcome.summary, policy: t(`official.poll-assistant.outcome.policy.${outcome.policy}`)
+      }) : undefined),
+      mentionedWids: recipients,
+      idempotencyKey: `poll-assistant:${deliveryId}:v1`, deliveryBatchKey, deliverySequence: 0
     },
-    createdAt: now.toISOString()
+    createdAt: now.toISOString(), activationAnnouncementEnabled: config.messages.activationEnabled, reuseExistingAnnouncement: true
   });
-  if (delivery.status === 'sent') {
-    return false;
-  }
-  await enqueuePollDeliveryJob(context, {
-    scopeId: snapshot.poll.scopeId,
-    deliveryId,
-    ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
-    groupWid: snapshot.poll.chatId,
-    attempt: delivery.attempt + 1
-  });
-  return true;
+  const queued = await enqueueStoredAnnouncement(context, snapshot, delivery);
+  if (snapshot.round.activatedAt) await ensurePollActivationAnnouncement(context, roundId, now);
+  return queued;
+}
+
+async function publicationRecipients(context: PollAnnouncementContext, snapshot: StoredPollRoundSnapshot): Promise<string[]> {
+  const electorate = getPollAggregate(pollsDatabase(context.databases), snapshot.poll.id)?.electorate;
+  if (!electorate) throw new Error('Poll publication requires a captured electorate');
+  const botWid = await context.getCurrentBotWid?.();
+  const bot = botWid ? await context.resolveIdentityAddress?.(botWid) : undefined;
+  const excluded = new Set([botWid, bot?.canonicalWid, ...(bot?.aliases ?? [])].filter((value): value is string => Boolean(value)));
+  return [...new Set(electorate.filter(elector => elector.voterIdentityId !== bot?.identityId && !excluded.has(elector.voterWid))
+    .map(elector => elector.voterWid.trim()).filter(Boolean))].sort();
 }
 
 export async function ensurePollActivationAnnouncement(
@@ -81,6 +83,8 @@ export async function ensurePollActivationAnnouncement(
   const existingDelivery = getPollDelivery(pollsDatabase(context.databases), `poll-announcement:${roundId}:activated`);
   if (existingDelivery) return enqueueStoredAnnouncement(context, snapshot, existingDelivery);
   if (snapshot.round.activationAnnouncementSuppressedAt) return false;
+  // A publication without a suppression marker froze the enabled policy, including legacy publications.
+  if (!getPollDelivery(pollsDatabase(context.databases), `poll-announcement:${roundId}:published`)) return false;
   const t = await context.i18n.translatorForScope(snapshot.poll.scopeId);
   const locale = (await context.i18n.resolveScopeLocale(snapshot.poll.scopeId)).locale;
   const config = parsePollAssistantConfig(await context.configFor(snapshot.poll.scopeId));
@@ -89,24 +93,25 @@ export async function ensurePollActivationAnnouncement(
   let delivery;
   try {
     delivery = ensurePollLifecycleDelivery(pollsDatabase(context.databases), {
-    pollId: snapshot.poll.id,
-    roundId,
-    delivery: {
-      id: deliveryId,
-      kind: 'activation',
-      deliveryKey: `${deliveryId}:v1`,
-      chatId: snapshot.poll.chatId,
-      text: t('official.poll-assistant.announcement.activated', {
-        question: snapshot.poll.definition.question,
-        closesAt: formatTimestamp(snapshot.round.closesAt, config.timezone, locale),
-        pollId: snapshot.poll.id
-      }),
-      idempotencyKey: `poll-assistant:${deliveryId}:v1`,
-      deliveryBatchKey,
-      deliverySequence: 1
-    },
-    createdAt: now.toISOString()
-  });
+      pollId: snapshot.poll.id,
+      roundId,
+      delivery: {
+        id: deliveryId,
+        kind: 'activation',
+        deliveryKey: `${deliveryId}:v1`,
+        chatId: snapshot.poll.chatId,
+        text: renderPollTemplate({ kind: 'activation', overrides: config.messages, t, values: {
+          question: snapshot.poll.definition.question, pollId: snapshot.poll.id, timezone: config.timezone,
+          closing: formatTimestamp(snapshot.round.closesAt, config.timezone, locale),
+          closesAt: formatTimestamp(snapshot.round.closesAt, config.timezone, locale),
+          cutoffAt: formatTimestamp(snapshot.round.closesAt, config.timezone, locale)
+        } }),
+        idempotencyKey: `poll-assistant:${deliveryId}:v1`,
+        deliveryBatchKey,
+        deliverySequence: 1
+      },
+      createdAt: now.toISOString(), reuseExistingAnnouncement: true
+    });
   } catch (error) {
     if (error instanceof PollActivationAnnouncementSuppressedError) return false;
     throw error;
@@ -150,22 +155,27 @@ async function enqueueStoredAnnouncement(
 
 function renderPublicationAnnouncement(
   snapshot: StoredPollRoundSnapshot,
-  timezone: string,
+  config: PollAssistantConfig,
   locale: string,
-  t: TranslateFn
+  t: TranslateFn,
+  distributing: boolean,
+  postVoteAction: string | undefined
 ): string {
+  const timezone = config.timezone;
   const definition = snapshot.poll.definition;
   const tiePolicy = definition.purpose === 'decide'
     ? t(`official.poll-assistant.flow.tiePolicy.${tiePolicyKey(definition.tiePolicy.kind)}`)
     : t('official.poll-assistant.flow.summary.tie.none');
-  return t('official.poll-assistant.announcement.published', {
+  return renderPollTemplate({ kind: 'publication', overrides: config.messages, t, values: {
+    deliveryNotice: t(`official.poll-assistant.announcement.delivery.${definition.electorate.kind === 'actor' ? 'actor' : definition.ballotDelivery === 'group' ? 'group' : distributing ? 'privateUnderway' : 'private'}`),
+    timezone, postVoteAction, cutoffAt: snapshot.round.closesAt ? formatTimestamp(snapshot.round.closesAt, timezone, locale) : undefined,
+    activationTimeout: definition.closing.kind === 'deadline' && definition.closing.deadline.mode === 'after_first_non_creator_response' ? String(definition.closing.deadline.activationTimeoutMinutes) : undefined,
     question: definition.question,
     options: [...definition.options]
       .sort((left, right) => left.ordinal - right.ordinal)
-      .map((option) => t('official.poll-assistant.flow.summary.option', {
-        ordinal: option.ordinal,
-        label: option.label
-      })).join('\n'),
+      .map((option) => renderPollTemplate({ kind: 'publicationOption', overrides: config.messages, t, values: {
+        ordinal: option.ordinal, label: option.label, option: option.label
+      } })).join('\n'),
     purpose: t(`official.poll-assistant.purpose.${definition.purpose}`),
     rule: ruleLabel(definition, t),
     closing: closingLabel(snapshot, timezone, locale, t),
@@ -174,7 +184,7 @@ function renderPublicationAnnouncement(
     ballotDelivery: t(`official.poll-assistant.flow.ballotDelivery.${definition.ballotDelivery}`),
     voterDisclosure: t(`official.poll-assistant.flow.voterDisclosure.${definition.voterDisclosure}`),
     pollId: definition.id
-  });
+  } });
 }
 
 function closingLabel(
@@ -188,7 +198,7 @@ function closingLabel(
     return t('official.poll-assistant.flow.summary.manual');
   }
   if (closing.deadline.mode === 'after_first_non_creator_response') {
-    return t('official.poll-assistant.flow.summary.afterFirstResponse', {
+    return t('official.poll-assistant.announcement.closing.afterFirstResponse', {
       minutes: closing.deadline.durationMinutes,
       timeoutMinutes: closing.deadline.activationTimeoutMinutes
     });
@@ -265,12 +275,12 @@ function tiePolicyKey(kind: 'no_decision' | 'authorized_choice' | 'status_quo' |
 function formatTimestamp(value: string, timezone: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, {
     dateStyle: 'medium',
-    timeStyle: 'short',
+    timeStyle: 'medium',
     timeZone: timezone
   }).format(new Date(value));
 }
 
 type PollAnnouncementContext = Pick<
   PluginRuntimeContext,
-  'databases' | 'i18n' | 'configFor' | 'queue'
+  'databases' | 'i18n' | 'configFor' | 'queue' | 'getCurrentBotWid' | 'resolveIdentityAddress'
 >;

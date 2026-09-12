@@ -3519,31 +3519,40 @@ export function recordPollAutomationAction<T>(db: PluginDatabase, input: {
   response: T;
   createdAt: string;
 }): { inserted: boolean; response: T } {
+  return db.transaction(() => recordPollAutomationActionInTransaction(db, input));
+}
+
+function recordPollAutomationActionInTransaction<T>(db: PluginDatabase, input: {
+  pollId: string;
+  kind: 'resolve_outcome' | 'cancel';
+  idempotencyKey: string;
+  requestSha256: string;
+  response: T;
+  createdAt: string;
+}): { inserted: boolean; response: T } {
   const pollId = required(input.pollId, 'pollId');
   const idempotencyKey = required(input.idempotencyKey, 'idempotencyKey');
   const requestSha256 = sha256Schema.parse(input.requestSha256);
   const createdAt = timestampSchema.parse(input.createdAt);
-  return db.transaction(() => {
-    const existing = getPollAutomationAction<T>(db, { pollId, kind: input.kind });
-    if (existing) {
-      if (existing.idempotencyKey !== idempotencyKey || existing.requestSha256 !== requestSha256) {
-        throw new Error(`Poll automation ${input.kind} is already bound to different input.`);
-      }
-      return { inserted: false, response: existing.response };
+  const existing = getPollAutomationAction<T>(db, { pollId, kind: input.kind });
+  if (existing) {
+    if (existing.idempotencyKey !== idempotencyKey || existing.requestSha256 !== requestSha256) {
+      throw new Error(`Poll automation ${input.kind} is already bound to different input.`);
     }
-    db.run(
-      `INSERT INTO poll_automation_actions (
-         poll_id, kind, idempotency_key, request_sha256, response_json, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?)`,
-      pollId,
-      input.kind,
-      idempotencyKey,
-      requestSha256,
-      JSON.stringify(input.response),
-      createdAt
-    );
-    return { inserted: true, response: input.response };
-  });
+    return { inserted: false, response: existing.response };
+  }
+  db.run(
+    `INSERT INTO poll_automation_actions (
+       poll_id, kind, idempotency_key, request_sha256, response_json, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?)`,
+    pollId,
+    input.kind,
+    idempotencyKey,
+    requestSha256,
+    JSON.stringify(input.response),
+    createdAt
+  );
+  return { inserted: true, response: input.response };
 }
 
 export function completeActorPollOutcome(db: PluginDatabase, input: {
@@ -3554,13 +3563,14 @@ export function completeActorPollOutcome(db: PluginDatabase, input: {
   actionRequestSha256: string;
   actionResponse: unknown;
   delivery: PollDeliveryIntent;
+  additionalDeliveries?: readonly PollDeliveryIntent[] | undefined;
   completedAt: string;
 }): 'completed' | 'existing' {
   const pollId = required(input.pollId, 'pollId');
   const result = pollResultSchema.parse(input.result);
   const inputSha256 = sha256Schema.parse(input.inputSha256);
   const completedAt = timestampSchema.parse(input.completedAt);
-  validateDeliveryIntent(input.delivery);
+  const deliveries = validateResultDeliveryBatch(input.delivery, input.additionalDeliveries);
   return db.transaction(() => {
     const action = getPollAutomationAction(db, { pollId, kind: 'resolve_outcome' });
     if (action) {
@@ -3633,9 +3643,9 @@ export function completeActorPollOutcome(db: PluginDatabase, input: {
         completedAt,
         pollId
       );
-      insertDelivery(db, pollId, round.id, input.delivery, completedAt);
+      for (const delivery of deliveries) insertDelivery(db, pollId, round.id, delivery, completedAt);
     }
-    recordPollAutomationAction(db, {
+    recordPollAutomationActionInTransaction(db, {
       pollId,
       kind: 'resolve_outcome',
       idempotencyKey: input.actionIdempotencyKey,
@@ -4003,12 +4013,13 @@ export function resolvePollTie(db: PluginDatabase, input: {
   resolverWid: string;
   reason?: string | undefined;
   delivery: PollDeliveryIntent;
+  additionalDeliveries?: readonly PollDeliveryIntent[] | undefined;
   resolvedAt: string;
 }): void {
   const resolvedAt = timestampSchema.parse(input.resolvedAt);
   const roundId = required(input.roundId, 'roundId');
   requireDistinct(input.selectedOptionIds, 'Selected tie-break option ids');
-  validateDeliveryIntent(input.delivery);
+  const deliveries = validateResultDeliveryBatch(input.delivery, input.additionalDeliveries);
   if (input.delivery.kind !== 'result') {
     throw new Error('A tie resolution requires a result delivery.');
   }
@@ -4055,7 +4066,7 @@ export function resolvePollTie(db: PluginDatabase, input: {
       resolvedAt,
       round.poll_id
     );
-    insertDelivery(db, round.poll_id, roundId, input.delivery, resolvedAt);
+    for (const delivery of deliveries) insertDelivery(db, round.poll_id, roundId, delivery, resolvedAt);
     ensurePollOutcomeHandoff(db, result, resolvedAt, input.selectedOptionIds);
   });
 }
@@ -4110,6 +4121,19 @@ function insertDelivery(
 
 function normalizedMentionRecipients(value: readonly string[] | undefined): string[] {
   return [...new Set(z.array(z.string().trim().min(1)).max(100_000).parse(value ?? []))].sort();
+}
+
+function validateResultDeliveryBatch(primary: PollDeliveryIntent, additional: readonly PollDeliveryIntent[] = []): PollDeliveryIntent[] {
+  const deliveries = [primary, ...additional];
+  deliveries.forEach(validateDeliveryIntent);
+  requireDistinct(deliveries.map(delivery => delivery.id), 'Poll delivery ids');
+  requireDistinct(deliveries.map(delivery => delivery.deliveryKey), 'Poll delivery keys');
+  requireDistinct(deliveries.map(delivery => delivery.idempotencyKey), 'Poll delivery idempotency keys');
+  if (deliveries.some(delivery => delivery.kind !== 'result' || delivery.chatId !== primary.chatId)) throw new Error('Result pages must target the same result chat');
+  if (deliveries.length > 1 && (!primary.deliveryBatchKey || deliveries.some((delivery, index) => delivery.deliveryBatchKey !== primary.deliveryBatchKey || delivery.deliverySequence !== index))) {
+    throw new Error('Result pages require one contiguous ordered batch');
+  }
+  return deliveries;
 }
 
 function validateDeliveryIntent(delivery: PollDeliveryIntent): void {

@@ -6,7 +6,7 @@ import { parsePollAssistantConfig } from './config';
 import { pollAllowsMultipleAnswers, type PollBallot } from './domain';
 import { enqueuePollDeliveryJob, enqueuePollPublishJob } from './jobs';
 import { calculatePollResult } from './resultCalculator';
-import { renderPollResult } from './resultRendering';
+import { renderPollResultMessages } from './resultRendering';
 import {
   POLL_ASSISTANT_AUTOMATION_SERVICE_ID,
   POLL_ASSISTANT_CANCEL_POLL_METHOD,
@@ -339,24 +339,7 @@ async function resolveActorOutcome(
   ]);
   const config = parsePollAssistantConfig(configInput);
   const deliveryId = `poll-result:${round.id}`;
-  const completion = completeActorPollOutcome(db, {
-    pollId: aggregate.poll.id,
-    result,
-    inputSha256: createPollResultInputSha256({
-      definition: aggregate.poll.definition,
-      electorateIdentityIds: [actor.identityId],
-      ballots: [ballot],
-      cutoffAt: completedAt.toISOString()
-    }),
-    actionIdempotencyKey: input.resolutionIdempotencyKey,
-    actionRequestSha256,
-    actionResponse: response,
-    delivery: {
-      id: deliveryId,
-      kind: 'result',
-      deliveryKey: `result:${round.id}:v1`,
-      chatId: aggregate.poll.chatId,
-      text: renderPollResult({
+  const messages = renderPollResultMessages({
         definition: aggregate.poll.definition,
         result,
         ballots: [ballot],
@@ -371,14 +354,36 @@ async function resolveActorOutcome(
             }],
         cutoffAtLabel: new Intl.DateTimeFormat(localeResolution.locale, {
           dateStyle: 'medium',
-          timeStyle: 'short',
+          timeStyle: 'medium',
           timeZone: config.timezone
         }).format(completedAt),
+        timezone: config.timezone,
+        templates: config.messages,
         locale: localeResolution.locale,
         t
-      }),
-      idempotencyKey: `poll-assistant:result:${aggregate.poll.id}:${round.id}:v1`
-    },
+      });
+  const deliveries = messages.map((text, index) => ({
+    id: index === 0 ? deliveryId : `${deliveryId}:page:${index + 1}`, kind: 'result' as const,
+    deliveryKey: index === 0 ? `result:${round.id}:v1` : `result:${round.id}:page:${index + 1}:v1`,
+    chatId: aggregate.poll.chatId, text,
+    idempotencyKey: index === 0 ? `poll-assistant:result:${aggregate.poll.id}:${round.id}:v1` : `poll-assistant:result:${aggregate.poll.id}:${round.id}:page:${index + 1}:v1`,
+    deliveryBatchKey: deliveryId, deliverySequence: index,
+    ...(index ? { notBefore: new Date(completedAt.getTime() + index * 2_000).toISOString() } : {})
+  }));
+  const completion = completeActorPollOutcome(db, {
+    pollId: aggregate.poll.id,
+    result,
+    inputSha256: createPollResultInputSha256({
+      definition: aggregate.poll.definition,
+      electorateIdentityIds: [actor.identityId],
+      ballots: [ballot],
+      cutoffAt: completedAt.toISOString()
+    }),
+    actionIdempotencyKey: input.resolutionIdempotencyKey,
+    actionRequestSha256,
+    actionResponse: response,
+    delivery: deliveries[0]!,
+    additionalDeliveries: deliveries.slice(1),
     completedAt: completedAt.toISOString()
   });
   if (completion === 'completed') {

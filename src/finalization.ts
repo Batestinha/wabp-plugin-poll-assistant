@@ -202,6 +202,8 @@ async function resultDeliveries(input: {
     ballots: input.ballots,
     electorate: input.electorate,
     cutoffAtLabel,
+    timezone: config.timezone,
+    templates: config.messages,
     locale: localeResolution.locale,
     t
   });
@@ -368,7 +370,7 @@ function isTerminalPrivateIssuance(
 function formatTimestamp(value: Date, timezone: string, locale: string): string {
   return new Intl.DateTimeFormat(locale, {
     dateStyle: 'medium',
-    timeStyle: 'short',
+    timeStyle: 'medium',
     timeZone: timezone
   }).format(value);
 }

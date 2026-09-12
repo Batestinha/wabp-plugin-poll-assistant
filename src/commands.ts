@@ -1,3 +1,4 @@
+import { paginatePollText, renderPollTemplate } from './templates';
 import { createHash } from 'node:crypto';
 import { previewAssistantFlow } from '../../../adminBot/flows/assistantFlowPreview';
 import { createPollCreationFlowDefinition, pollCreationPresetInitialData } from './flow';
@@ -1139,31 +1140,31 @@ async function resolvePollLifecycleTie(context: PluginCommandContext, ctx: Comma
     .sort((left, right) => left.ordinal - right.ordinal);
   const groupT = await context.i18n.translatorForScope(lookup.aggregate.poll.scopeId);
   const deliveryId = `poll-assistant:resolve:${lookup.aggregate.poll.id}`;
+  const resolvedAt = new Date();
+  const config = parsePollAssistantConfig(await runtime.configFor(lookup.aggregate.poll.scopeId));
+  const locale = (await context.i18n.resolveScopeLocale(lookup.aggregate.poll.scopeId)).locale;
+  const messages = paginatePollText(renderPollTemplate({ kind: 'tieResolved', overrides: config.messages, t: groupT, values: {
+    question: definition.question, pollId: definition.id, timezone: config.timezone,
+    cutoffAt: round.closesAt ? formatTimestamp(round.closesAt, config.timezone, locale) : undefined,
+    options: selectedOptions.map(option => option.label).join(', '), resolver: ctx.message.senderDisplayName || actor.canonicalWid
+  } }));
+  const deliveries = messages.map((text, index) => ({
+    id: index === 0 ? deliveryId : `${deliveryId}:page:${index + 1}`, kind: 'result' as const,
+    deliveryKey: index === 0 ? deliveryId : `${deliveryId}:page:${index + 1}`,
+    chatId: lookup.aggregate.poll.chatId, text,
+    idempotencyKey: index === 0 ? deliveryId : `${deliveryId}:page:${index + 1}`,
+    deliveryBatchKey: deliveryId, deliverySequence: index,
+    ...(index ? { notBefore: new Date(resolvedAt.getTime() + index * 2_000).toISOString() } : {})
+  }));
   try {
     resolvePollTie(pollsDatabase(runtime.databases), {
       roundId: round.id,
       selectedOptionIds: uniqueSelectedIds,
       resolverIdentityId: actor.identityId,
       resolverWid: actor.canonicalWid,
-      delivery: {
-        id: deliveryId,
-        kind: 'result',
-        deliveryKey: deliveryId,
-        chatId: lookup.aggregate.poll.chatId,
-        text: groupT('official.poll-assistant.resolve.delivery', {
-          question: definition.question,
-          options: selectedOptions.map((option) => groupT(
-            'official.poll-assistant.status.option',
-            {
-              ordinal: option.ordinal,
-              label: option.label,
-              optionId: option.id
-            }
-          )).join('\n')
-        }),
-        idempotencyKey: deliveryId
-      },
-      resolvedAt: new Date().toISOString()
+      delivery: deliveries[0]!,
+      additionalDeliveries: deliveries.slice(1),
+      resolvedAt: resolvedAt.toISOString()
     });
   } catch (error) {
     if (!(error instanceof PollTieResultDeliveryPendingError)) {
