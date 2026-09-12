@@ -1,5 +1,5 @@
-import type { PluginManifest } from '../../../../packages/plugin-sdk/src/manifest';
-import { POLL_HISTORY_OWNED_DATA_RESOURCE } from '../../../../packages/plugin-sdk/src/owned-data';
+import type { PluginManifest } from '@wabs/plugin-sdk/manifest';
+import { POLL_HISTORY_OWNED_DATA_RESOURCE } from '@wabs/plugin-sdk/owned-data';
 import { pollAssistantConfigSchema, pollAssistantRuntimeConfigSchema } from './config';
 import {
   POLL_ASSISTANT_PLUGIN_ID,

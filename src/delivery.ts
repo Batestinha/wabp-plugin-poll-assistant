@@ -3,7 +3,7 @@ import type { PluginRuntimeContext } from './runtime';
 import {
   isDefinitelyNotSentTransportError,
   isTransportProviderUnavailableError
-} from '../../../../packages/plugin-sdk/src/transport-errors';
+} from '@wabs/plugin-sdk/transport-errors';
 import { parsePollAssistantConfig } from './config';
 import {
   DOAS_PRIVATE_POLL_RELEASE_METHOD,

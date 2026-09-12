@@ -1,7 +1,7 @@
-import type { PluginJobContext } from '../../../../packages/plugin-sdk/src/jobs';
-import type { PluginDatabaseRegistry } from '../../../../packages/plugin-sdk/src/database';
+import type { PluginJobContext } from '@wabs/plugin-sdk/jobs';
+import type { PluginDatabaseRegistry } from '@wabs/plugin-sdk/database';
 import { type PluginCommandContext } from './runtime';
-import type { MessageActor } from '../../../../packages/plugin-sdk/src/message-actor';
+import type { MessageActor } from '@wabs/plugin-sdk/message-actor';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';
 import { enqueuePollFinalizeJob } from './jobs';
 import {

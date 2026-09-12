@@ -1,4 +1,4 @@
-import { type MessageCatalog } from '../../../../packages/plugin-sdk/src/i18n';
+import { type MessageCatalog } from '@wabs/plugin-sdk/i18n';
 export const pollOutcomeMessages: MessageCatalog = {
   "official.poll-assistant.outcome.createTitle": "Create a complete poll",
   "official.poll-assistant.outcome.createDescription": "Prepare, publish and verify a complete poll, with optional declared consequences.",

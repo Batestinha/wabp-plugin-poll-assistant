@@ -1,5 +1,5 @@
 import { pollTemplateDefaultMessages } from './templates';
-import { type MessageCatalog } from '../../../../packages/plugin-sdk/src/i18n';
+import { type MessageCatalog } from '@wabs/plugin-sdk/i18n';
 import { pollOutcomeMessages } from './outcomeMessages';
 
 export const pollAssistantMessages: MessageCatalog = {

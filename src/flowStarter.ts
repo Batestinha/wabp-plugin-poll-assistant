@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import { attachPollOutcomeFlow } from './outcomeFlow';
 import { z } from 'zod';
-import { type DurableFlowEngine as FlowEngine } from '../../../../packages/plugin-sdk/src/durable-flow';
-import { type FlowSessionSnapshot, type FlowStartOrigin, type FlowStartResult } from '../../../../packages/plugin-sdk/src/flow-engine';
-import { type PluginScopedI18n as I18nService } from '../../../../packages/plugin-sdk/src/durable-plugin';
-import { type LanguagePackScope, type TranslateFn } from '../../../../packages/plugin-sdk/src/i18n';
-import type { StableIdentityAddressResolution } from '../../../../packages/plugin-sdk/src/identity';
-import type { PrivateDeliveryFallback } from '../../../../packages/plugin-sdk/src/transport';
+import { type DurableFlowEngine as FlowEngine } from '@wabs/plugin-sdk/durable-flow';
+import { type FlowSessionSnapshot, type FlowStartOrigin, type FlowStartResult } from '@wabs/plugin-sdk/flow-engine';
+import { type PluginScopedI18n as I18nService } from '@wabs/plugin-sdk/durable-plugin';
+import { type LanguagePackScope, type TranslateFn } from '@wabs/plugin-sdk/i18n';
+import type { StableIdentityAddressResolution } from '@wabs/plugin-sdk/identity';
+import type { PrivateDeliveryFallback } from '@wabs/plugin-sdk/transport';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';
 import { pollCreationPresetSchema } from './config';
 import {

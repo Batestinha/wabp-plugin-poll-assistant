@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { registerPollCreateAction } from './createAction';
-import type { PluginServiceRegistration } from '../../../../packages/plugin-sdk/src/services';
+import type { PluginServiceRegistration } from '@wabs/plugin-sdk/services';
 import { type PluginServiceRegistrationContext } from './runtime';
 import { parsePollAssistantConfig } from './config';
 import { pollAllowsMultipleAnswers, type PollBallot } from './domain';

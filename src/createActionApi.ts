@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import type { WorkflowActionDeclaration } from '../../../../packages/plugin-sdk/src/workflows';
-import { workflowProgramSchema } from '../../../../packages/plugin-sdk/src/workflows';
+import type { WorkflowActionDeclaration } from '@wabs/plugin-sdk/workflows';
+import { workflowProgramSchema } from '@wabs/plugin-sdk/workflows';
 import { pollDefinitionSchema } from './domain';
 
 export const POLL_CREATE_ACTION_SERVICE = 'official.poll-assistant.create-action.v1';

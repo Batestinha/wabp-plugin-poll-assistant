@@ -1,8 +1,8 @@
-import type { StableIdentityAddressResolution } from '../../../../packages/plugin-sdk/src/identity';
-import { requirePollVotesThroughCutoff } from '../../../../packages/plugin-sdk/src/poll-readback';
-import { pollVoteRevisionIsLater } from '../../../../packages/plugin-sdk/src/poll-ordering';
-import type { PollVoteReadback } from '../../../../packages/plugin-sdk/src/transport';
-import { equivalentWhatsAppMessageIds } from '../../../../packages/plugin-sdk/src/message-ids';
+import type { StableIdentityAddressResolution } from '@wabs/plugin-sdk/identity';
+import { requirePollVotesThroughCutoff } from '@wabs/plugin-sdk/poll-readback';
+import { pollVoteRevisionIsLater } from '@wabs/plugin-sdk/poll-ordering';
+import type { PollVoteReadback } from '@wabs/plugin-sdk/transport';
+import { equivalentWhatsAppMessageIds } from '@wabs/plugin-sdk/message-ids';
 import type { PollReadbackBallot } from './domain';
 import {
   mapResolvedPollVoteToReadbackBallot,

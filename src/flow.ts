@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import type { FlowDefinition, FlowState, FlowStep } from '../../../../packages/plugin-sdk/src/flow-types';
-import { type FlowSessionSnapshot } from '../../../../packages/plugin-sdk/src/flow-engine';
-import { type TranslateFn } from '../../../../packages/plugin-sdk/src/i18n';
-import { chronoParserForLocale } from '../../../../packages/plugin-sdk/src/chrono-locale';
-import { parseLocalizedDateTimeInput } from '../../../../packages/plugin-sdk/src/localized-date-time';
+import type { FlowDefinition, FlowState, FlowStep } from '@wabs/plugin-sdk/flow-types';
+import { type FlowSessionSnapshot } from '@wabs/plugin-sdk/flow-engine';
+import { type TranslateFn } from '@wabs/plugin-sdk/i18n';
+import { chronoParserForLocale } from '@wabs/plugin-sdk/chrono-locale';
+import { parseLocalizedDateTimeInput } from '@wabs/plugin-sdk/localized-date-time';
 import {
   WHATSAPP_POLL_MAX_OPTIONS,
   WHATSAPP_POLL_MIN_OPTIONS,
   numberPollOptions,
   validatePollContent
-} from '../../../../packages/plugin-sdk/src/poll-contract';
+} from '@wabs/plugin-sdk/poll-contract';
 import type { PollCreationPreset } from './config';
 import { countUnitSchema, pollDefinitionSchema, type PollDefinition } from './domain';
 

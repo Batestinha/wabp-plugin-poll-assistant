@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { PluginRuntimeContext } from './runtime';
-import { isPluginServiceNotInvokedError } from '../../../../packages/plugin-sdk/src/services';
+import { isPluginServiceNotInvokedError } from '@wabs/plugin-sdk/services';
 import {
   isDefinitelyNotSentTransportError,
   isTransportProviderUnavailableError,
   TransportGroupNotFoundError
-} from '../../../../packages/plugin-sdk/src/transport-errors';
+} from '@wabs/plugin-sdk/transport-errors';
 import {
   DOAS_POLL_PUBLISH_METHOD,
   DOAS_POLL_RECONCILE_METHOD,

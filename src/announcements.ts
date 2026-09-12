@@ -1,4 +1,4 @@
-import { type TranslateFn } from '../../../../packages/plugin-sdk/src/i18n';
+import { type TranslateFn } from '@wabs/plugin-sdk/i18n';
 import type { PluginRuntimeContext } from './runtime';
 import { parsePollAssistantConfig, type PollAssistantConfig } from './config';
 import { renderPollTemplate } from './templates';

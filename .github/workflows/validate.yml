@@ -1,0 +1,48 @@
+name: Validate standalone plugin
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        node: ['22.23.2', '24.15.0']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - name: Build the immutable archive twice
+        run: |
+          set -Eeuo pipefail
+          npm run release:archive
+          sha256sum .cache/*.tgz > .cache/first.sha256
+          npm run release:archive
+          sha256sum --check .cache/first.sha256
+      - name: Load outside the repository with packaged dependencies
+        run: |
+          set -Eeuo pipefail
+          fixture_dir="$(mktemp -d "${RUNNER_TEMP}/wabs-fixture.XXXXXX")"
+          tar -xzf .cache/*.tgz -C "$fixture_dir"
+          node tests/archive-smoke.cjs "$fixture_dir/package"
+          mkdir -p release-artifacts
+          cp .cache/*.tgz release-artifacts/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: standalone-plugin-node${{ matrix.node }}
+          path: release-artifacts/*.tgz
+          retention-days: 14
+          if-no-files-found: error

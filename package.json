@@ -1,0 +1,43 @@
+{
+  "name": "@wabs/plugin-poll-assistant",
+  "version": "0.5.0",
+  "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
+  "license": "MIT",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "wa-plugin.json",
+    "locales",
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "provenance.json",
+    "package-lock.json",
+    "contracts",
+    "migrations"
+  ],
+  "bundledDependencies": [
+    "@wabs/plugin-sdk",
+    "zod"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test tests/*.test.cjs",
+    "release:archive": "npm run build && python scripts/package-release.py"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@wabs/plugin-sdk": "file:vendor/wabs-plugin-sdk-0.3.7-b7600fd0d44f.tgz",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.20",
+    "typescript": "5.9.3"
+  }
+}

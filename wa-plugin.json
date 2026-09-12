@@ -1,0 +1,3297 @@
+{
+  "schemaVersion": 1,
+  "pluginId": "official.poll-assistant",
+  "name": "Poll Assistant",
+  "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
+  "kind": "managed_group",
+  "version": "0.5.0",
+  "coreApiRange": "^0.3.0",
+  "entrypoint": "dist/index.js",
+  "messageNamespace": "official.poll-assistant",
+  "descriptionKey": "official.poll-assistant.description",
+  "commands": [
+    "/poll",
+    "/poll create",
+    "/poll list",
+    "/poll status",
+    "/poll open",
+    "/poll close",
+    "/poll cancel",
+    "/poll resolve",
+    "/poll actions"
+  ],
+  "help": {
+    "featureId": "poll-assistant",
+    "titleKey": "official.poll-assistant.help.feature.title",
+    "summaryKey": "official.poll-assistant.help.feature.summary",
+    "order": 25,
+    "topics": [
+      {
+        "topicId": "create",
+        "titleKey": "official.poll-assistant.help.create",
+        "summaryKey": "official.poll-assistant.help.create",
+        "order": 10,
+        "commands": [
+          "/poll",
+          "/poll create"
+        ],
+        "exampleKeys": [
+          "official.poll-assistant.help.create.example"
+        ],
+        "keywords": [
+          "poll",
+          "create",
+          "decision",
+          "measure",
+          "tally"
+        ],
+        "availability": {
+          "invocation": "group_only",
+          "requiredAccessPlane": "group_member",
+          "permission": "polls.create",
+          "requiresCurrentManagedGroupMembership": true,
+          "currentManagedGroupMembershipMode": "effective_scope",
+          "allowCurrentManagedGroupMemberConfigPath": "allowMemberCreation",
+          "requiredConfigBooleanPath": "allowCreation",
+          "requiredBotCapabilities": [
+            "botIsAdmin",
+            "canSend"
+          ]
+        }
+      },
+      {
+        "topicId": "inspect",
+        "titleKey": "official.poll-assistant.help.status",
+        "summaryKey": "official.poll-assistant.help.list",
+        "order": 20,
+        "commands": [
+          "/poll list",
+          "/poll status"
+        ],
+        "exampleKeys": [
+          "official.poll-assistant.help.list.example",
+          "official.poll-assistant.help.status.example"
+        ],
+        "keywords": [
+          "poll",
+          "list",
+          "status",
+          "result"
+        ],
+        "availability": {
+          "invocation": "group_only",
+          "requiredAccessPlane": "group_member",
+          "requiresCurrentManagedGroupMembership": true,
+          "currentManagedGroupMembershipMode": "effective_scope"
+        }
+      },
+      {
+        "topicId": "manage",
+        "titleKey": "official.poll-assistant.help.close",
+        "summaryKey": "official.poll-assistant.help.cancel",
+        "order": 30,
+        "commands": [
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve",
+          "/poll actions"
+        ],
+        "exampleKeys": [
+          "official.poll-assistant.help.open.example",
+          "official.poll-assistant.help.close.example",
+          "official.poll-assistant.help.cancel.example",
+          "official.poll-assistant.help.resolve.example",
+          "official.poll-assistant.outcome.help.example"
+        ],
+        "keywords": [
+          "poll",
+          "open",
+          "close",
+          "cancel",
+          "resolve",
+          "tie"
+        ],
+        "availability": {
+          "invocation": "group_only",
+          "requiredAccessPlane": "group_member",
+          "requiresCurrentManagedGroupMembership": true,
+          "currentManagedGroupMembershipMode": "effective_scope"
+        }
+      }
+    ]
+  },
+  "eventSubscriptions": [
+    "poll.vote",
+    "participant.change",
+    "plugin.job"
+  ],
+  "services": [
+    {
+      "serviceId": "official.poll-assistant.create-action.v1",
+      "methods": [
+        {
+          "name": "describe",
+          "access": "read"
+        },
+        {
+          "name": "prepare",
+          "access": "read"
+        },
+        {
+          "name": "execute",
+          "access": "mutation"
+        },
+        {
+          "name": "inspect",
+          "access": "read"
+        }
+      ]
+    },
+    {
+      "serviceId": "official.poll-assistant.automation.v1",
+      "description": "Idempotent source-owned automated decision poll lifecycles.",
+      "methods": [
+        {
+          "name": "ensurePoll",
+          "access": "mutation"
+        },
+        {
+          "name": "resolvePoll",
+          "access": "read",
+          "availability": "installed"
+        },
+        {
+          "name": "resolveOutcome",
+          "access": "mutation"
+        },
+        {
+          "name": "cancelPoll",
+          "access": "mutation"
+        }
+      ]
+    },
+    {
+      "serviceId": "official.poll-assistant.lifecycle.v1",
+      "description": "Idempotent source-owned named survey lifecycles and immutable ballot snapshots.",
+      "methods": [
+        {
+          "name": "ensurePoll",
+          "access": "mutation"
+        },
+        {
+          "name": "inspectPoll",
+          "access": "read",
+          "availability": "installed"
+        },
+        {
+          "name": "finalizePoll",
+          "access": "mutation"
+        },
+        {
+          "name": "cancelPoll",
+          "access": "mutation"
+        }
+      ]
+    }
+  ],
+  "requiredPermissions": [
+    "polls.create",
+    "polls.manage"
+  ],
+  "requiredBotCapabilities": [],
+  "dangerousActions": [],
+  "backgroundJobs": [
+    "poll.publish",
+    "poll.activate",
+    "poll.finalize",
+    "poll.private-issue",
+    "poll.deliver",
+    "poll.cleanup"
+  ],
+  "backgroundJobAvailability": "installed",
+  "cancellation": {
+    "workflows": [
+      {
+        "id": "poll-assistant-create",
+        "description": "Guided poll setup before the poll lifecycle is durably created.",
+        "mode": "core-flow",
+        "scope": "actor-chat",
+        "commands": [
+          "/poll",
+          "/poll create"
+        ],
+        "cancellableStates": [
+          "active"
+        ],
+        "terminalStates": [
+          "completed",
+          "cancelled",
+          "expired"
+        ],
+        "effects": [
+          "terminate-poll-setup-session"
+        ]
+      },
+      {
+        "id": "published-poll-lifecycle",
+        "description": "Durably created poll lifecycles require the explicit poll cancellation command.",
+        "mode": "not-cancellable",
+        "scope": "scope",
+        "commands": [
+          "/poll cancel"
+        ],
+        "notCancellableReason": "A published or queued native poll may already be visible, so cancellation requires the lifecycle-specific confirmed command and durable result delivery."
+      }
+    ]
+  },
+  "dependencies": [
+    {
+      "pluginId": "official.doas",
+      "versionRange": ">=0.4.0"
+    }
+  ],
+  "databases": [
+    {
+      "name": "polls",
+      "engine": "sqlite",
+      "scope": "account",
+      "migrations": "migrations/polls"
+    }
+  ],
+  "ownedData": [
+    {
+      "resource": "transport.poll-history"
+    }
+  ],
+  "dataVersion": "6",
+  "assistant": {
+    "summary": "Guided durable WhatsApp polls with operator presets, aggregate results, and confirmed lifecycle management.",
+    "summaryKey": "official.poll-assistant.assistant.summary",
+    "workflows": [
+      {
+        "intent": "poll_create",
+        "description": "Start the guided Decide, Measure, or Tally setup flow, using an operator-selected poll preset when available.",
+        "descriptionKey": "official.poll-assistant.assistant.workflow.create",
+        "commands": [
+          "/poll",
+          "/poll create"
+        ]
+      },
+      {
+        "intent": "poll_inspect",
+        "description": "List polls in the originating group and retrieve aggregate results; open-poll tallies are available only when enabled by the operator.",
+        "descriptionKey": "official.poll-assistant.assistant.workflow.inspect",
+        "commands": [
+          "/poll list",
+          "/poll status"
+        ]
+      },
+      {
+        "intent": "poll_manage",
+        "description": "Open a schedule-deferred automated poll or close a manageable poll through guided selection and confirmation; cancellation and tie resolution remain explicit.",
+        "descriptionKey": "official.poll-assistant.assistant.workflow.manage",
+        "commands": [
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ]
+      }
+    ]
+  },
+  "operatorConsole": {
+    "configPaths": [
+      "messages.publication",
+      "messages.publicationOption",
+      "messages.activation",
+      "messages.result",
+      "messages.resultOption",
+      "messages.selected",
+      "messages.selectedByRandomDraw",
+      "messages.tie",
+      "messages.noDecision",
+      "messages.quorumNotMet",
+      "messages.measuredDistribution",
+      "messages.measuredScale",
+      "messages.counted",
+      "messages.tieResolved",
+      "messages.activationEnabled",
+      "messages.mentionEligible",
+      "allowCreation",
+      "allowMemberCreation",
+      "timezone",
+      "defaultClosingMode",
+      "defaultDeadlineMinutes",
+      "defaultActivationTimeoutMinutes",
+      "maxDeadlineMinutes",
+      "defaultQuorumMode",
+      "defaultAbsoluteQuorumResponses",
+      "defaultPercentageQuorumBasisPoints",
+      "maxActivePollsPerChat",
+      "maxPrivateElectorateSize",
+      "ballotRetentionDays",
+      "assistantExposeProvisionalResults",
+      "automationWorkingHours.enabled",
+      "automationWorkingHours.windows",
+      "creationPresets"
+    ],
+    "controls": [
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.publication",
+        "id": "plugin.official.poll-assistant.messages.publication",
+        "label": "Publication",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 500,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-presence-v1",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "deliveryNotice",
+              "label": "Delivery Notice",
+              "sampleValue": "@all — poll published in this group."
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "purpose",
+              "label": "Purpose",
+              "sampleValue": "Decision"
+            },
+            {
+              "token": "rule",
+              "label": "Rule",
+              "sampleValue": "Most votes"
+            },
+            {
+              "token": "closing",
+              "label": "Closing",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "quorum",
+              "label": "Quorum",
+              "sampleValue": "50%"
+            },
+            {
+              "token": "tiePolicy",
+              "label": "Tie Policy",
+              "sampleValue": "Authorized choice"
+            },
+            {
+              "token": "ballotDelivery",
+              "label": "Ballot Delivery",
+              "sampleValue": "Group"
+            },
+            {
+              "token": "voterDisclosure",
+              "label": "Voter Disclosure",
+              "sampleValue": "Named"
+            },
+            {
+              "token": "activationTimeout",
+              "label": "Activation Timeout",
+              "sampleValue": "120 minutes"
+            },
+            {
+              "token": "postVoteAction",
+              "label": "Post Vote Action",
+              "sampleValue": "The selected option updates the event."
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "deliveryNotice",
+              "label": "Delivery Notice",
+              "sampleValue": "@all — poll published in this group."
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "purpose",
+              "label": "Purpose",
+              "sampleValue": "Decision"
+            },
+            {
+              "token": "rule",
+              "label": "Rule",
+              "sampleValue": "Most votes"
+            },
+            {
+              "token": "closing",
+              "label": "Closing",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "quorum",
+              "label": "Quorum",
+              "sampleValue": "50%"
+            },
+            {
+              "token": "tiePolicy",
+              "label": "Tie Policy",
+              "sampleValue": "Authorized choice"
+            },
+            {
+              "token": "ballotDelivery",
+              "label": "Ballot Delivery",
+              "sampleValue": "Group"
+            },
+            {
+              "token": "voterDisclosure",
+              "label": "Voter Disclosure",
+              "sampleValue": "Named"
+            },
+            {
+              "token": "activationTimeout",
+              "label": "Activation Timeout",
+              "sampleValue": "120 minutes"
+            },
+            {
+              "token": "postVoteAction",
+              "label": "Post Vote Action",
+              "sampleValue": "The selected option updates the event."
+            }
+          ],
+          "placeholder": "{deliveryNotice}\n\nQuestion: {question}\nOptions:\n{options}\n\nPurpose: {purpose}\nRule: {rule}\nClosing: {closing}{{#if postVoteAction}}\n\n{postVoteAction}{{/if}}"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.publicationOption",
+        "id": "plugin.official.poll-assistant.messages.publicationOption",
+        "label": "Publication option row",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 501,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-presence-v1",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "ordinal",
+              "label": "Ordinal",
+              "sampleValue": "1"
+            },
+            {
+              "token": "label",
+              "label": "Label",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "option",
+              "label": "Option",
+              "sampleValue": "Afternoon"
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "ordinal",
+              "label": "Ordinal",
+              "sampleValue": "1"
+            },
+            {
+              "token": "label",
+              "label": "Label",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "option",
+              "label": "Option",
+              "sampleValue": "Afternoon"
+            }
+          ],
+          "placeholder": "{ordinal}. {label}"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.activation",
+        "id": "plugin.official.poll-assistant.messages.activation",
+        "label": "Activation notice",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 502,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-presence-v1",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "closing",
+              "label": "Closing",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "closesAt",
+              "label": "Closes At",
+              "sampleValue": "12:22:57"
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "closing",
+              "label": "Closing",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "closesAt",
+              "label": "Closes At",
+              "sampleValue": "12:22:57"
+            }
+          ],
+          "placeholder": "Closing time for «{question}»: {closing}"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.result",
+        "id": "plugin.official.poll-assistant.messages.result",
+        "label": "Result",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 503,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-presence-v1",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "outcome",
+              "label": "Outcome",
+              "sampleValue": "Selected: Afternoon"
+            },
+            {
+              "token": "responseCount",
+              "label": "Response Count",
+              "sampleValue": "2"
+            },
+            {
+              "token": "eligibleCount",
+              "label": "Eligible Count",
+              "sampleValue": "4"
+            },
+            {
+              "token": "turnoutPercent",
+              "label": "Turnout Percent",
+              "sampleValue": "50"
+            },
+            {
+              "token": "optionResults",
+              "label": "Option Results",
+              "sampleValue": "Afternoon: 2 responses (100% of respondents) (Ana, Rui)"
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "outcome",
+              "label": "Outcome",
+              "sampleValue": "Selected: Afternoon"
+            },
+            {
+              "token": "responseCount",
+              "label": "Response Count",
+              "sampleValue": "2"
+            },
+            {
+              "token": "eligibleCount",
+              "label": "Eligible Count",
+              "sampleValue": "4"
+            },
+            {
+              "token": "turnoutPercent",
+              "label": "Turnout Percent",
+              "sampleValue": "50"
+            },
+            {
+              "token": "optionResults",
+              "label": "Option Results",
+              "sampleValue": "Afternoon: 2 responses (100% of respondents) (Ana, Rui)"
+            }
+          ],
+          "placeholder": "Poll closed: «{question}»\n\n*{outcome}*\n\nResponses: {responseCount} of {eligibleCount} eligible voters ({turnoutPercent}%)\n\n{optionResults}"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.resultOption",
+        "id": "plugin.official.poll-assistant.messages.resultOption",
+        "label": "Result option row",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 504,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-presence-v1",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "ordinal",
+              "label": "Ordinal",
+              "sampleValue": "1"
+            },
+            {
+              "token": "option",
+              "label": "Option",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "count",
+              "label": "Count",
+              "sampleValue": "2"
+            },
+            {
+              "token": "respondentPercent",
+              "label": "Respondent Percent",
+              "sampleValue": "100"
+            },
+            {
+              "token": "eligiblePercent",
+              "label": "Eligible Percent",
+              "sampleValue": "50"
+            },
+            {
+              "token": "voters",
+              "label": "Voters",
+              "sampleValue": "Ana, Rui"
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "ordinal",
+              "label": "Ordinal",
+              "sampleValue": "1"
+            },
+            {
+              "token": "option",
+              "label": "Option",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "count",
+              "label": "Count",
+              "sampleValue": "2"
+            },
+            {
+              "token": "respondentPercent",
+              "label": "Respondent Percent",
+              "sampleValue": "100"
+            },
+            {
+              "token": "eligiblePercent",
+              "label": "Eligible Percent",
+              "sampleValue": "50"
+            },
+            {
+              "token": "voters",
+              "label": "Voters",
+              "sampleValue": "Ana, Rui"
+            }
+          ],
+          "placeholder": "{option}: {count} response(s) ({respondentPercent}% of respondents){{#if voters}} ({voters}){{/if}}"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.selected",
+        "id": "plugin.official.poll-assistant.messages.selected",
+        "label": "Selection wording",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 505,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-presence-v1",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "placeholder": "Selected: {options}"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.selectedByRandomDraw",
+        "id": "plugin.official.poll-assistant.messages.selectedByRandomDraw",
+        "label": "Random draw wording",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 506,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-presence-v1",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "placeholder": "Selected by random draw: {options}"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.tie",
+        "id": "plugin.official.poll-assistant.messages.tie",
+        "label": "Tie wording",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 507,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-presence-v1",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "placeholder": "Tie: {tiedOptions}{{#if certainOptions}}; already selected: {certainOptions}{{/if}}. Remaining places: {remainingSeats}."
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.noDecision",
+        "id": "plugin.official.poll-assistant.messages.noDecision",
+        "label": "No decision wording",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 508,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-presence-v1",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "placeholder": "No decision: {tiedOptions}{{#if certainOptions}}; already selected: {certainOptions}{{/if}}."
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.quorumNotMet",
+        "id": "plugin.official.poll-assistant.messages.quorumNotMet",
+        "label": "Insufficient turnout wording",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 509,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-presence-v1",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "placeholder": "Insufficient turnout."
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.measuredDistribution",
+        "id": "plugin.official.poll-assistant.messages.measuredDistribution",
+        "label": "Distribution wording",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 510,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-presence-v1",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "placeholder": "Responses measured."
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.measuredScale",
+        "id": "plugin.official.poll-assistant.messages.measuredScale",
+        "label": "Scale wording",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 511,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-presence-v1",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "placeholder": "Median: {medianOptions}; mode: {modeOptions}."
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.counted",
+        "id": "plugin.official.poll-assistant.messages.counted",
+        "label": "Count wording",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 512,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-presence-v1",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            }
+          ],
+          "placeholder": "Counted: {total} {unit}."
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.tieResolved",
+        "id": "plugin.official.poll-assistant.messages.tieResolved",
+        "label": "Tie resolution notice",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 513,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-presence-v1",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            },
+            {
+              "token": "resolver",
+              "label": "Resolver",
+              "sampleValue": "Ana"
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example"
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?"
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon"
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57"
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "certainOptions",
+              "label": "Certain Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "tiedOptions",
+              "label": "Tied Options",
+              "sampleValue": "Morning and afternoon"
+            },
+            {
+              "token": "remainingSeats",
+              "label": "Remaining Seats",
+              "sampleValue": "1"
+            },
+            {
+              "token": "medianOptions",
+              "label": "Median Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "modeOptions",
+              "label": "Mode Options",
+              "sampleValue": "Afternoon"
+            },
+            {
+              "token": "total",
+              "label": "Total",
+              "sampleValue": "2"
+            },
+            {
+              "token": "unit",
+              "label": "Unit",
+              "sampleValue": "items"
+            },
+            {
+              "token": "resolver",
+              "label": "Resolver",
+              "sampleValue": "Ana"
+            }
+          ],
+          "placeholder": "Tie resolved for «{question}»: {options}."
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.activationEnabled",
+        "id": "plugin.official.poll-assistant.messages.activationEnabled",
+        "label": "Announce activation",
+        "description": "Send a separate closing-time announcement after activation. New announcements are disabled by default.",
+        "section": "Messages",
+        "order": 520,
+        "schema": {
+          "type": "boolean"
+        },
+        "ui": {
+          "helpText": "Send a separate closing-time announcement after activation. New announcements are disabled by default.",
+          "widget": "toggle"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.mentionEligible",
+        "id": "plugin.official.poll-assistant.messages.mentionEligible",
+        "label": "Notify eligible voters",
+        "description": "Include actual mentions of eligible voters in new publication announcements, excluding the bot.",
+        "section": "Messages",
+        "order": 521,
+        "schema": {
+          "type": "boolean"
+        },
+        "ui": {
+          "helpText": "Include actual mentions of eligible voters in new publication announcements, excluding the bot.",
+          "widget": "toggle"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "allowCreation",
+        "id": "plugin.official.poll-assistant.allowCreation",
+        "label": "Accept new polls",
+        "description": "Allow new Poll Assistant setup flows in this scope; committed poll lifecycles continue until terminal.",
+        "section": "Poll Assistant",
+        "order": 10,
+        "schema": {
+          "type": "boolean"
+        },
+        "ui": {
+          "helpText": "Allow new Poll Assistant setup flows in this scope; committed poll lifecycles continue until terminal.",
+          "widget": "toggle"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "allowMemberCreation",
+        "id": "plugin.official.poll-assistant.allowMemberCreation",
+        "label": "Members may create polls",
+        "description": "Allow current managed-group members to start polls without a separate polls.create grant.",
+        "section": "Poll Assistant",
+        "order": 20,
+        "schema": {
+          "type": "boolean"
+        },
+        "ui": {
+          "helpText": "Allow current managed-group members to start polls without a separate polls.create grant.",
+          "widget": "toggle"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "timezone",
+        "id": "plugin.official.poll-assistant.timezone",
+        "label": "Timezone",
+        "description": "IANA timezone used to display poll deadlines and results.",
+        "section": "Poll Assistant",
+        "order": 30,
+        "schema": {
+          "type": "string",
+          "format": "timezone",
+          "required": true
+        },
+        "ui": {
+          "helpText": "IANA timezone used to display poll deadlines and results.",
+          "widget": "select"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "creationPresets",
+        "id": "plugin.official.poll-assistant.creationPresets",
+        "label": "Creation presets",
+        "description": "Configure named poll-creation policies. Fixed fields are supplied by the operator and skipped in chat; suggested fields remain creator-selectable and are shown first.",
+        "section": "Poll Assistant",
+        "order": 40,
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "ui": {
+          "helpText": "Configure named poll-creation policies. Fixed fields are supplied by the operator and skipped in chat; suggested fields remain creator-selectable and are shown first.",
+          "widget": "builder",
+          "builderId": "official.poll-assistant.creation-presets.v1",
+          "builderEndpoints": {
+            "actions": "/api/v1/operator-console/workflow-actions"
+          }
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "automationWorkingHours.enabled",
+        "id": "plugin.official.poll-assistant.automationWorkingHours.enabled",
+        "label": "Enforce automation working hours",
+        "description": "Gate automated poll publication and first-response activation to the configured weekly windows. Manual polls are unaffected.",
+        "section": "Poll Assistant",
+        "order": 50,
+        "schema": {
+          "type": "boolean"
+        },
+        "ui": {
+          "helpText": "Gate automated poll publication and first-response activation to the configured weekly windows. Manual polls are unaffected.",
+          "widget": "toggle"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "automationWorkingHours.windows",
+        "id": "plugin.official.poll-assistant.automationWorkingHours.windows",
+        "label": "Automation working-hours windows",
+        "description": "Weekly local-time windows that gate automated poll publication and first-response activation. Multiple and overnight windows are supported.",
+        "section": "Poll Assistant",
+        "order": 60,
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "ui": {
+          "helpText": "Weekly local-time windows that gate automated poll publication and first-response activation. Multiple and overnight windows are supported.",
+          "widget": "builder",
+          "builderId": "official.poll-assistant.working-hours.v1"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "defaultClosingMode",
+        "id": "plugin.official.poll-assistant.defaultClosingMode",
+        "label": "Default closing mode",
+        "description": "Closing choice shown first in the guided poll setup flow.",
+        "section": "Poll defaults",
+        "order": 100,
+        "schema": {
+          "type": "enum",
+          "enum": [
+            {
+              "value": "deadline",
+              "label": "Deadline"
+            },
+            {
+              "value": "after_first_non_creator_response",
+              "label": "After first response"
+            },
+            {
+              "value": "manual",
+              "label": "Manual close"
+            }
+          ]
+        },
+        "ui": {
+          "helpText": "Closing choice shown first in the guided poll setup flow.",
+          "widget": "segmented",
+          "options": [
+            {
+              "value": "deadline",
+              "label": "Deadline"
+            },
+            {
+              "value": "after_first_non_creator_response",
+              "label": "After first response"
+            },
+            {
+              "value": "manual",
+              "label": "Manual close"
+            }
+          ]
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "defaultDeadlineMinutes",
+        "id": "plugin.official.poll-assistant.defaultDeadlineMinutes",
+        "label": "Default duration",
+        "description": "Default number of minutes a deadline poll remains open after publication.",
+        "section": "Poll defaults",
+        "order": 110,
+        "schema": {
+          "type": "number",
+          "unit": "minutes",
+          "min": 1,
+          "max": 44640
+        },
+        "ui": {
+          "helpText": "Default number of minutes a deadline poll remains open after publication.",
+          "widget": "duration"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "maxDeadlineMinutes",
+        "id": "plugin.official.poll-assistant.maxDeadlineMinutes",
+        "label": "Maximum duration",
+        "description": "Maximum number of minutes allowed between publication and a configured deadline.",
+        "section": "Poll defaults",
+        "order": 120,
+        "schema": {
+          "type": "number",
+          "unit": "minutes",
+          "min": 1,
+          "max": 44640
+        },
+        "ui": {
+          "helpText": "Maximum number of minutes allowed between publication and a configured deadline.",
+          "widget": "duration"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "defaultActivationTimeoutMinutes",
+        "id": "plugin.official.poll-assistant.defaultActivationTimeoutMinutes",
+        "label": "Default activation timeout",
+        "description": "Minutes after publication before a first-response poll promotes a creator ballot or finalizes with no response.",
+        "section": "Poll defaults",
+        "order": 130,
+        "schema": {
+          "type": "number",
+          "unit": "minutes",
+          "min": 1,
+          "max": 44640
+        },
+        "ui": {
+          "helpText": "Minutes after publication before a first-response poll promotes a creator ballot or finalizes with no response.",
+          "widget": "duration"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "defaultQuorumMode",
+        "id": "plugin.official.poll-assistant.defaultQuorumMode",
+        "label": "Default turnout rule",
+        "description": "Minimum-turnout choice shown first in the guided poll setup flow.",
+        "section": "Turnout defaults",
+        "order": 200,
+        "schema": {
+          "type": "enum",
+          "enum": [
+            {
+              "value": "none",
+              "label": "No minimum"
+            },
+            {
+              "value": "absolute",
+              "label": "Respondent count"
+            },
+            {
+              "value": "percentage",
+              "label": "Electorate percentage"
+            }
+          ]
+        },
+        "ui": {
+          "helpText": "Minimum-turnout choice shown first in the guided poll setup flow.",
+          "widget": "segmented",
+          "options": [
+            {
+              "value": "none",
+              "label": "No minimum"
+            },
+            {
+              "value": "absolute",
+              "label": "Respondent count"
+            },
+            {
+              "value": "percentage",
+              "label": "Electorate percentage"
+            }
+          ]
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "defaultAbsoluteQuorumResponses",
+        "id": "plugin.official.poll-assistant.defaultAbsoluteQuorumResponses",
+        "label": "Default respondent count",
+        "description": "Default minimum respondent count when count-based turnout is selected.",
+        "section": "Turnout defaults",
+        "order": 210,
+        "schema": {
+          "type": "number",
+          "unit": "items",
+          "min": 1,
+          "max": 100000
+        },
+        "ui": {
+          "helpText": "Default minimum respondent count when count-based turnout is selected.",
+          "widget": "number"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "defaultPercentageQuorumBasisPoints",
+        "id": "plugin.official.poll-assistant.defaultPercentageQuorumBasisPoints",
+        "label": "Default turnout basis points",
+        "description": "Default electorate percentage in basis points when percentage turnout is selected; 5000 means 50%.",
+        "section": "Turnout defaults",
+        "order": 220,
+        "schema": {
+          "type": "number",
+          "min": 1,
+          "max": 10000
+        },
+        "ui": {
+          "helpText": "Default electorate percentage in basis points when percentage turnout is selected; 5000 means 50%.",
+          "widget": "number"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "maxActivePollsPerChat",
+        "id": "plugin.official.poll-assistant.maxActivePollsPerChat",
+        "label": "Active poll limit",
+        "description": "Maximum number of active or tie-pending polls allowed in one originating chat.",
+        "section": "Lifecycle limits",
+        "order": 300,
+        "schema": {
+          "type": "number",
+          "unit": "items",
+          "min": 1,
+          "max": 100
+        },
+        "ui": {
+          "helpText": "Maximum number of active or tie-pending polls allowed in one originating chat.",
+          "widget": "number"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "ballotRetentionDays",
+        "id": "plugin.official.poll-assistant.ballotRetentionDays",
+        "label": "Ballot retention",
+        "description": "Days to retain Poll Assistant voter-level working data after terminal delivery. The independent chat archive follows its own retention policy; aggregate results remain stored.",
+        "section": "Lifecycle limits",
+        "order": 310,
+        "schema": {
+          "type": "number",
+          "unit": "days",
+          "min": 1,
+          "max": 3650
+        },
+        "ui": {
+          "helpText": "Days to retain Poll Assistant voter-level working data after terminal delivery. The independent chat archive follows its own retention policy; aggregate results remain stored.",
+          "widget": "duration"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "maxPrivateElectorateSize",
+        "id": "plugin.official.poll-assistant.maxPrivateElectorateSize",
+        "label": "Private ballot electorate limit",
+        "description": "Maximum eligible voters for a private multi-recipient poll. The platform limit is 250.",
+        "section": "Lifecycle limits",
+        "order": 320,
+        "schema": {
+          "type": "number",
+          "unit": "items",
+          "min": 1,
+          "max": 250
+        },
+        "ui": {
+          "helpText": "Maximum eligible voters for a private multi-recipient poll. The platform limit is 250.",
+          "widget": "number"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "assistantExposeProvisionalResults",
+        "id": "plugin.official.poll-assistant.assistantExposeProvisionalResults",
+        "label": "Assistant may show live tallies",
+        "description": "Allow the natural-language assistant to expose aggregate event-derived tallies for open polls. These results are explicitly provisional; finalized results always use authoritative WhatsApp readback.",
+        "section": "Assistant access",
+        "order": 400,
+        "schema": {
+          "type": "boolean"
+        },
+        "ui": {
+          "helpText": "Allow the natural-language assistant to expose aggregate event-derived tallies for open polls. These results are explicitly provisional; finalized results always use authoritative WhatsApp readback.",
+          "widget": "toggle"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      }
+    ],
+    "internalConfigPaths": []
+  },
+  "workflowActions": [
+    {
+      "actionId": "official.poll-assistant.create",
+      "version": 1,
+      "sources": [
+        "assistant"
+      ],
+      "titleKey": "official.poll-assistant.outcome.createTitle",
+      "descriptionKey": "official.poll-assistant.outcome.createDescription",
+      "serviceId": "official.poll-assistant.create-action.v1",
+      "methods": {
+        "describe": "describe",
+        "prepare": "prepare",
+        "execute": "execute",
+        "inspect": "inspect"
+      },
+      "requiredPermissions": [],
+      "requiredBotCapabilities": [
+        "botIsAdmin",
+        "canSend"
+      ],
+      "inputSchema": {
+        "type": "object",
+        "required": [
+          "groupWid",
+          "definition"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "groupWid": {
+            "type": "string",
+            "title": "Group"
+          },
+          "definition": {
+            "type": "object",
+            "description": "Poll definition schema version 1. Use id \"draft\" and stable option IDs option:1, option:2, etc. All rules, closing, quorum, ballot delivery and disclosure must be explicit.",
+            "required": [
+              "schemaVersion",
+              "id",
+              "purpose",
+              "question",
+              "options",
+              "closing",
+              "quorum",
+              "electorate",
+              "ballotDelivery",
+              "voterDisclosure",
+              "rule"
+            ],
+            "properties": {
+              "schemaVersion": {
+                "const": 1
+              },
+              "id": {
+                "type": "string"
+              },
+              "purpose": {
+                "enum": [
+                  "decide",
+                  "measure",
+                  "count"
+                ]
+              },
+              "question": {
+                "type": "string"
+              },
+              "options": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 12,
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "label",
+                    "ordinal"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "ordinal": {
+                      "type": "integer"
+                    },
+                    "numericValue": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              },
+              "closing": {
+                "type": "object",
+                "description": "kind manual, or kind deadline with deadline: {mode:after_publish,durationMinutes} / {mode:at,closesAt ISO timestamp} / {mode:after_first_non_creator_response,durationMinutes,activationTimeoutMinutes}"
+              },
+              "quorum": {
+                "type": "object",
+                "description": "kind none, absolute with minimumResponses, or percentage with minimumTurnoutBasisPoints"
+              },
+              "electorate": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "members_at_publication",
+                      "group_members_until_cutoff"
+                    ]
+                  }
+                }
+              },
+              "ballotDelivery": {
+                "enum": [
+                  "group",
+                  "private"
+                ]
+              },
+              "voterDisclosure": {
+                "enum": [
+                  "named",
+                  "hidden"
+                ]
+              },
+              "rule": {
+                "type": "object",
+                "description": "decide: plurality, approval, single_non_transferable or multiwinner_approval with seats, approve_reject with approveOptionId/rejectOptionId/minimumApprovalBasisPoints; measure: distribution with allowMultipleAnswers or ordered_scale; count: sum with unit"
+              },
+              "tiePolicy": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "no_decision",
+                      "authorized_choice",
+                      "status_quo",
+                      "random_draw"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "outcome": {
+            "type": "object",
+            "required": [
+              "policy",
+              "program"
+            ],
+            "properties": {
+              "policy": {
+                "enum": [
+                  "automatic",
+                  "requester_confirmation"
+                ]
+              },
+              "program": {
+                "type": "object",
+                "description": "Version 1 workflow graph. Each node has id, actionId, version, input, conditions, bindings and dependsOn. Use only declared poll_outcome actions. Option references use stable definition option IDs."
+              }
+            }
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "pollId": {
+            "type": "string"
+          },
+          "roundId": {
+            "type": "string"
+          },
+          "messageId": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "scopeClock": {
+    "timezoneConfigPaths": [
+      "timezone"
+    ]
+  }
+}

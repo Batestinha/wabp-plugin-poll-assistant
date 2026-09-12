@@ -1,1 +1,1 @@
-export type { DurablePlugin as BotPlugin, DurablePluginCommandContext as PluginCommandContext, DurablePluginRuntimeContext as PluginRuntimeContext, DurablePluginServiceContext as PluginServiceRegistrationContext } from '../../../../packages/plugin-sdk/src/durable-plugin';
+export type { DurablePlugin as BotPlugin, DurablePluginCommandContext as PluginCommandContext, DurablePluginRuntimeContext as PluginRuntimeContext, DurablePluginServiceContext as PluginServiceRegistrationContext } from '@wabs/plugin-sdk/durable-plugin';

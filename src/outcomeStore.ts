@@ -1,5 +1,5 @@
-import type { PluginDatabase } from '../../../../packages/plugin-sdk/src/database';
-import { canonicalJson, workflowDigest } from '../../../../packages/plugin-sdk/src/workflows';
+import type { PluginDatabase } from '@wabs/plugin-sdk/database';
+import { canonicalJson, workflowDigest } from '@wabs/plugin-sdk/workflows';
 import { frozenPollOutcomeSchema, pollOutcomeResult, type FrozenPollOutcome } from './outcomeConfig';
 import type { PollResult } from './domain';
 

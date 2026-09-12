@@ -1,10 +1,10 @@
-import { type DurableFlowEngine as FlowEngine } from '../../../../packages/plugin-sdk/src/durable-flow';
+import { type DurableFlowEngine as FlowEngine } from '@wabs/plugin-sdk/durable-flow';
 import type { PluginRuntimeContext } from './runtime';
 import { type PluginCommandContext } from './runtime';
-import type { CommandContext } from '../../../../packages/plugin-sdk/src/commands';
-import { type TranslateFn } from '../../../../packages/plugin-sdk/src/i18n';
-import type { WorkflowRunRecord } from '../../../../packages/plugin-sdk/src/workflow-store';
-import { workflowDigest, type WorkflowPrincipal } from '../../../../packages/plugin-sdk/src/workflows';
+import type { CommandContext } from '@wabs/plugin-sdk/commands';
+import { type TranslateFn } from '@wabs/plugin-sdk/i18n';
+import type { WorkflowRunRecord } from '@wabs/plugin-sdk/workflow-store';
+import { workflowDigest, type WorkflowPrincipal } from '@wabs/plugin-sdk/workflows';
 import { getPollOutcomeConfiguration, listPollOutcomeHandoffs } from './outcomeStore';
 import { getPollAggregate, ensurePollLifecycleDelivery, pollsDatabase } from './store';
 import { enqueuePollDeliveryJob } from './jobs';

@@ -4,7 +4,7 @@ import {
   throwIfAborted,
   type AssistantTool,
   type AssistantToolContext
-} from '../../../../packages/plugin-sdk/src/assistant-tools';
+} from '@wabs/plugin-sdk/assistant-tools';
 import { type PluginCommandContext } from './runtime';
 import { parsePollAssistantConfig } from './config';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';

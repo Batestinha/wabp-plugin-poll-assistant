@@ -1,5 +1,5 @@
 import type { PluginRuntimeContext } from './runtime';
-import { type PluginJobEvent, type PluginParticipantChangeEvent, type PluginPollVotePluginEvent, type PluginRuntimeHooks } from '../../../../packages/plugin-sdk/src/hooks';
+import { type PluginJobEvent, type PluginParticipantChangeEvent, type PluginPollVotePluginEvent, type PluginRuntimeHooks } from '@wabs/plugin-sdk/hooks';
 import { PollBallotMappingError, mapPluginPollVoteToBallot } from './ballotMapping';
 import { parsePollAssistantConfig } from './config';
 import { cleanupPollBallots, deliverPollMessage } from './delivery';

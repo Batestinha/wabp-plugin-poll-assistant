@@ -1,5 +1,5 @@
-import type { PluginJobContext } from '../../../../packages/plugin-sdk/src/jobs';
-import { enqueuePluginJob } from '../../../../packages/plugin-sdk/src/jobs';
+import type { PluginJobContext } from '@wabs/plugin-sdk/jobs';
+import { enqueuePluginJob } from '@wabs/plugin-sdk/jobs';
 import type { PluginRuntimeContext } from './runtime';
 import { z } from 'zod';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';

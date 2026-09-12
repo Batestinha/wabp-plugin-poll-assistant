@@ -1,10 +1,10 @@
 import { pollTemplateDefinitions, pollTemplateSamples, POLL_TEMPLATE_MAX_LENGTH } from './templates';
-import { defineControl } from '../../../../packages/plugin-sdk/src/controls';
+import { defineControl } from '@wabs/plugin-sdk/controls';
 import type {
   ControlDescriptor,
   ControlSchemaMetadata,
   ControlUiHint
-} from '../../../../packages/plugin-sdk/src/controls-types';
+} from '@wabs/plugin-sdk/controls-types';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';
 
 const POLL_COMMANDS = [

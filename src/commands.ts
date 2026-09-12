@@ -1,21 +1,21 @@
 import { paginatePollText, renderPollTemplate } from './templates';
 import { createHash } from 'node:crypto';
-import { previewAssistantFlow } from '../../../../packages/plugin-sdk/src/flow-preview';
+import { previewAssistantFlow } from '@wabs/plugin-sdk/flow-preview';
 import { createPollCreationFlowDefinition, pollCreationPresetInitialData } from './flow';
-import { parseCommand } from '../../../../packages/plugin-sdk/src/command-parser';
+import { parseCommand } from '@wabs/plugin-sdk/command-parser';
 import { z } from 'zod';
 import { pollActionsCommand, registerPollOutcomeApprovals } from './outcomes';
 import { pollOutcomeFromFlow } from './outcomeFlow';
 import { frozenPollOutcomeSchema, freezePollOutcome } from './outcomeConfig';
-import { type DurableFlowEngine as FlowEngine } from '../../../../packages/plugin-sdk/src/durable-flow';
-import { type FlowSessionSnapshot } from '../../../../packages/plugin-sdk/src/flow-engine';
-import type { CommandMetadata } from '../../../../packages/plugin-sdk/src/command-metadata';
-import type { CommandContext } from '../../../../packages/plugin-sdk/src/commands';
-import { type TranslateFn } from '../../../../packages/plugin-sdk/src/i18n';
-import { type PluginCancellationRegistration } from '../../../../packages/plugin-sdk/src/cancellations';
+import { type DurableFlowEngine as FlowEngine } from '@wabs/plugin-sdk/durable-flow';
+import { type FlowSessionSnapshot } from '@wabs/plugin-sdk/flow-engine';
+import type { CommandMetadata } from '@wabs/plugin-sdk/command-metadata';
+import type { CommandContext } from '@wabs/plugin-sdk/commands';
+import { type TranslateFn } from '@wabs/plugin-sdk/i18n';
+import { type PluginCancellationRegistration } from '@wabs/plugin-sdk/cancellations';
 import { type PluginCommandContext } from './runtime';
-import { requireDurableCommandRuntime as requireOfficialCommandRuntime, type DurableCommandRuntime as OfficialPluginCommandRuntime } from '../../../../packages/plugin-sdk/src/durable-plugin';
-import { requireScopeId } from '../../../../packages/plugin-sdk/src/commands';
+import { requireDurableCommandRuntime as requireOfficialCommandRuntime, type DurableCommandRuntime as OfficialPluginCommandRuntime } from '@wabs/plugin-sdk/durable-plugin';
+import { requireScopeId } from '@wabs/plugin-sdk/commands';
 import {
   parsePollAssistantConfig,
   type PollAssistantConfig,

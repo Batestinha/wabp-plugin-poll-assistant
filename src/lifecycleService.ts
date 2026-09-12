@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { PluginServiceRegistration } from '../../../../packages/plugin-sdk/src/services';
+import type { PluginServiceRegistration } from '@wabs/plugin-sdk/services';
 import { type PluginServiceRegistrationContext } from './runtime';
 import { parsePollAssistantConfig } from './config';
 import { enqueuePollDeliveryJob, enqueuePollPublishJob } from './jobs';

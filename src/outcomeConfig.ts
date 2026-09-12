@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { canonicalJson, workflowDigest, workflowProgramSchema, type WorkflowProgram } from '../../../../packages/plugin-sdk/src/workflows';
+import { canonicalJson, workflowDigest, workflowProgramSchema, type WorkflowProgram } from '@wabs/plugin-sdk/workflows';
 import type { PollDefinition, PollResult } from './domain';
-import { type TranslateFn } from '../../../../packages/plugin-sdk/src/i18n';
+import { type TranslateFn } from '@wabs/plugin-sdk/i18n';
 
 /** Presets may suggest a program, but cannot supply the requester's application policy. */
 export const pollOutcomePresetSchema = z.object({ program: workflowProgramSchema }).strict();
