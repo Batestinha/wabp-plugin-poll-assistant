@@ -39,6 +39,7 @@ export type PollTemplateKind = keyof typeof pollTemplateDefinitions;
 export type PollTemplateOverrides = Partial<Record<PollTemplateKind, string>>;
 export const POLL_TEMPLATE_MAX_LENGTH = 14_000;
 
+/** @operatorConsoleSamples Example values for token buttons and preview only. */
 export const pollTemplateSamples: Record<string, string> = {
   pollId: 'poll-example', question: 'Morning or afternoon?', timezone: 'Europe/Lisbon', cutoffAt: '12:22:57',
   deliveryNotice: '@all — poll published in this group.', options: 'Afternoon', purpose: 'Decision', rule: 'Most votes',
