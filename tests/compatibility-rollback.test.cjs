@@ -53,6 +53,15 @@ function cleanup(root) {
   fs.rmSync(root, { recursive: true, force: true });
 }
 
+test('initial reader preserves stored timezone until the forward feature release adopts the scope clock', () => {
+  assert.equal(previous.manifest.scopeClock, undefined);
+  assert.equal(require('../wa-plugin.json').scopeClock, undefined);
+  const stored = { timezone: 'UTC', maxActivePollsPerChat: 7 };
+  assert.equal(previous.manifest.configSchema.parse(stored).timezone, 'UTC');
+  assert.deepEqual(stored, { timezone: 'UTC', maxActivePollsPerChat: 7 });
+  assert.deepEqual(forward.manifest.scopeClock, { timezoneConfigPaths: ['timezone'] });
+});
+
 test('reader rollout creates legacy-compatible announcements and does not add new configuration fields', async () => {
   const root = directory(); let db;
   try {
@@ -70,10 +79,10 @@ test('reader rollout creates legacy-compatible announcements and does not add ne
   } finally { db?.close(); cleanup(root); }
 });
 
-test('0.4.1 to signed 0.5.0 to 0.4.1 preserves and delivers newly accepted frozen writes after restart', async () => {
+test('0.4.2 to signed 0.5.0 to 0.4.2 preserves and delivers newly accepted frozen writes after restart', async () => {
   const root = directory(); let db;
   try {
-    assert.equal(previous.manifest.version, '0.4.1');
+    assert.equal(previous.manifest.version, '0.4.2');
     assert.equal(forward.manifest.version, '0.5.0');
     const file = path.join(root, 'polls.sqlite');
     db = open(file);

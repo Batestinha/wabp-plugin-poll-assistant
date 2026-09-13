@@ -19,13 +19,14 @@
       "commit": "8d5fff56d610978b4ab2cb2116fd1a525ef479c4"
     },
     "readerDataVersion": "6",
-    "producerDeliveryFormat": "5",
+    "producerDeliveryFormat": "Legacy publication and activation; forward-compatible result text",
     "legacyAnnouncementSource": {
       "repository": "https://github.com/Batestinha/wabp",
       "commit": "42c1024ebbe0f5c0fe01d55e6dc9d974a8e4bf52",
       "path": "src/plugins/official/poll-assistant/announcements.ts",
       "sha256": "70f8e65db2efc26d5e6aae2d946b112939a1d619a22324fa034de2b515a18fad"
     },
-    "policy": "Read frozen mentions and suppression markers; new publications use legacy text, no mentions and enabled activation. New message configuration fields remain optional and preserved."
+    "policy": "Read frozen mentions and suppression markers; new publications use legacy text, the existing stored timezone, no mentions and enabled activation. Scope clock defaults start in 0.5.0. New message configuration fields remain optional and preserved.",
+    "scopeClockAdoption": "0.5.0"
   }
 }

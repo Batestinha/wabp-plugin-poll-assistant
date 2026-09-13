@@ -37,7 +37,7 @@ import {
 export const pollAssistantManifest: PluginManifest = {
   pluginId: POLL_ASSISTANT_PLUGIN_ID,
   kind: 'managed_group',
-  version: '0.4.1',
+  version: '0.4.2',
   coreApiRange: '^0.3.0',
   messageNamespace: 'official.poll-assistant',
   descriptionKey: 'official.poll-assistant.description',
@@ -161,7 +161,8 @@ export const pollAssistantManifest: PluginManifest = {
   requiredBotCapabilities: [],
   configSchema: pollAssistantConfigSchema,
   runtimeConfigSchema: pollAssistantRuntimeConfigSchema,
-  scopeClock: { timezoneConfigPaths: ['timezone'] },
+  // Initial reader rollout retains stored timezone defaults. The 0.5.0 feature release opts into scope clocks.
+  // Older producers re-render announcements during recovery; changing this default first breaks their content binding.
   dangerousActions: [],
   backgroundJobs: [
     POLL_PUBLISH_JOB,
