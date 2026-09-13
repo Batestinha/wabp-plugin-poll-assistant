@@ -148,5 +148,8 @@ test('the archive retains every SQL migration and all declared translations and 
   for (const migration of migrations) assert.equal(fs.readFileSync(path.join('migrations/polls', migration), 'utf8'), fs.readFileSync(path.join('src/migrations/polls', migration), 'utf8'));
   for (const key of Object.keys(plugin.manifest.defaultMessages)) assert.ok(pt[key]?.trim(), key);
   assert.equal(plugin.lifecycle, undefined);
-  assert.ok(metadata.operatorConsole.controls.length > 20);
+  assert.equal(metadata.operatorConsole.controls.length, 17);
+  assert.ok(metadata.operatorConsole.configPaths.every(value => !value.startsWith('messages.')));
+  assert.ok(metadata.operatorConsole.controls.every(control => !control.path.startsWith('messages.')));
+  assert.equal(Object.hasOwn(plugin.manifest.configSchema.parse({}), 'messages'), false);
 });

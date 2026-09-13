@@ -1,8 +1,12 @@
 # Poll Assistant
 
-Durable group and private polls, editable publication and result messages, named or hidden ballots, and configured workflow outcomes.
+Version 0.4.1 is the compatible reader release for the transition to 0.5.0. It reads data version 6, including frozen mention recipients and activation suppression, while new publication and activation announcements retain the previous delivery format. Message editors become available in 0.5.0. Existing message settings written by that release remain loadable and preserved after rollback.
 
-Standalone WABS package `official.poll-assistant` version `0.5.0`, requiring WABP core API `^0.3.0`. It preserves the plugin ID, account-owned `polls` database, scoped settings, creation recipes, queue keys and receipt formats. Data version 6 adds frozen mention recipients and durable activation-announcement suppression. Existing queued messages retain their text and recipients. Deploy a compatible reader before enabling new producers; an application downgrade must preserve writes accepted by the newer release.
+Deploy and rehearse this release before enabling 0.5.0 producers. This package alone is not proof that a complete application, session, queue and database rollback is safe.
+
+Durable group and private polls, named or hidden ballots, and configured workflow outcomes.
+
+Standalone WABS package `official.poll-assistant` version `0.4.1`, requiring WABP core API `^0.3.0`. It preserves the plugin ID, account-owned `polls` database, scoped settings, creation recipes, queue keys and receipt formats. Data version 6 adds frozen mention recipients and durable activation-announcement suppression. Existing queued messages retain their text and recipients. An application downgrade must preserve writes accepted by the newer release.
 
 Scope clocks supply default timezones. Existing UTC deadlines remain fixed. Poll messages use the original cutoff, even when result delivery is delayed. Templates support localized defaults, validation, conditional sections and pagination. Voter names only appear for named ballots; result names do not generate notification mentions.
 

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "version": "0.5.0",
+  "sourceCommit": "8d5fff56d610978b4ab2cb2116fd1a525ef479c4",
+  "url": "https://github.com/Batestinha/wabp-plugin-poll-assistant/releases/download/v0.5.0/official.poll-assistant-0.5.0.tgz",
+  "sha256": "b25d80f4337fa51965455391e4073c889090599cedf224d91beaa3e6cfea9065",
+  "keyId": "wabs-official-2026-09",
+  "publicKeyDerBase64": "MCowBQYDK2VwAyEA+5j3pA0nyuXqNiXRnPIManvvVr/V2uFUz86g0rNKZHU=",
+  "signatureBase64": "ZRcMbZD6t8000H3yjV+jrlHtF/ECS1PiUhk3R7KfRt7PYKM0wmXf+S3dK7RWkfmF1nnXSzf6ThRXw8upTgvhDw=="
+}

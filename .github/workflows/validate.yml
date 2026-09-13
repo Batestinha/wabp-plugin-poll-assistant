@@ -2,7 +2,7 @@ name: Validate standalone plugin
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/compatible-reader-*']
   pull_request:
 
 permissions:
@@ -28,18 +28,20 @@ jobs:
       - name: Build the immutable archive twice
         run: |
           set -Eeuo pipefail
+          archive=".cache/official.poll-assistant-$(node -p 'require("./package.json").version').tgz"
           npm run release:archive
-          sha256sum .cache/*.tgz > .cache/first.sha256
+          sha256sum "$archive" > .cache/first.sha256
           npm run release:archive
           sha256sum --check .cache/first.sha256
       - name: Load outside the repository with packaged dependencies
         run: |
           set -Eeuo pipefail
+          archive=".cache/official.poll-assistant-$(node -p 'require("./package.json").version').tgz"
           fixture_dir="$(mktemp -d "${RUNNER_TEMP}/wabs-fixture.XXXXXX")"
-          tar -xzf .cache/*.tgz -C "$fixture_dir"
+          tar -xzf "$archive" -C "$fixture_dir"
           node tests/archive-smoke.cjs "$fixture_dir/package"
           mkdir -p release-artifacts
-          cp .cache/*.tgz release-artifacts/
+          cp "$archive" release-artifacts/
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: standalone-plugin-node${{ matrix.node }}

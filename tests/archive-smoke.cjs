@@ -14,6 +14,9 @@ for (const key of Object.keys(plugin.manifest.defaultMessages)) assert.ok(pt[key
 for (const file of ['node_modules/@wabs/plugin-sdk/dist/command-plugin.js', 'node_modules/@wabs/plugin-sdk/LICENSE', 'node_modules/zod/LICENSE', 'contracts/provenance.json', 'contracts/LICENSE.doas']) assert.ok(fs.statSync(path.join(root, file)).isFile());
 assert.equal(fs.existsSync(path.join(root, 'node_modules/geo-tz')), false);
 assert.equal(plugin.manifest.configSchema.parse({ messages: { result: 'Stored: {question}' } }).messages.result, 'Stored: {question}');
+assert.equal(Object.hasOwn(plugin.manifest.configSchema.parse({}), 'messages'), false);
+assert.equal(metadata.operatorConsole.controls.length, 17);
+assert.ok(metadata.operatorConsole.configPaths.every(value => !value.startsWith('messages.')));
 assert.equal(metadata.dataVersion, '6');
 for (const file of fs.readdirSync(path.join(root, 'migrations/polls'))) assert.ok(file.endsWith('.sql'));
 assert.equal(fs.readdirSync(path.join(root, 'migrations/polls')).length, 6);

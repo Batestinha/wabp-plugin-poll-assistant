@@ -1,6 +1,6 @@
 {
   "name": "@wabs/plugin-poll-assistant",
-  "version": "0.5.0",
+  "version": "0.4.1",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "license": "MIT",
   "private": true,
@@ -27,7 +27,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test tests/*.test.cjs",
-    "release:archive": "npm run build && python scripts/package-release.py"
+    "release:archive": "npm run build && python scripts/package-release.py",
+    "pretest": "node scripts/prepare-compatibility-fixture.cjs"
   },
   "engines": {
     "node": ">=22"

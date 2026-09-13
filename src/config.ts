@@ -182,11 +182,16 @@ const pollAssistantConfigObjectSchema = z.object({
 });
 
 export const pollAssistantRuntimeConfigSchema = pollAssistantConfigObjectSchema.default({});
-export const pollAssistantConfigSchema = pollAssistantConfigObjectSchema.superRefine((config, ctx) => {
-  validatePollMessageSettings(config.messages, ctx);
-}).default({});
+// Do not introduce the new messages field into legacy stored configurations during reader rollout.
+// Settings accepted by the forward release remain readable and are preserved on later saves.
+export const pollAssistantConfigSchema = pollAssistantConfigObjectSchema.innerType()
+  .extend({ messages: pollMessageSettingsSchema.optional() }).superRefine((config, ctx) => {
+    const parsed = pollAssistantRuntimeConfigSchema.safeParse(config);
+    if (!parsed.success) for (const issue of parsed.error.issues) ctx.addIssue(issue);
+    if (config.messages !== undefined) validatePollMessageSettings(config.messages, ctx);
+  }).default({});
 
-export type PollAssistantConfig = z.infer<typeof pollAssistantConfigSchema>;
+export type PollAssistantConfig = z.infer<typeof pollAssistantRuntimeConfigSchema>;
 
 export function parsePollAssistantConfig(input: unknown): PollAssistantConfig {
   return pollAssistantRuntimeConfigSchema.parse(input ?? {});

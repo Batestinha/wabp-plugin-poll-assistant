@@ -229,4 +229,4 @@ export const pollAssistantControls: ControlDescriptor[] = [
     { widget: 'toggle' },
     'Assistant access'
   )
-];
+].filter(descriptor => !descriptor.id.startsWith('plugin.official.poll-assistant.messages.'));
