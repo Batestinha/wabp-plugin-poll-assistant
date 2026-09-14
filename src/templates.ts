@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { TranslateFn } from '@wabs/plugin-sdk/i18n';
-import { renderConditionalTemplate, validateConditionalTemplate } from '@wabs/plugin-sdk/templates';
+import { renderValueTemplate, validateValueTemplate, previewTemplateFragment, trimTemplateFragment, type TemplateFragment, type TemplateConditionVariable, type TemplateScalar, type ValueTemplateDefinition } from '@wabs/plugin-sdk/templates';
 
 const contextTokens = ['pollId', 'question', 'timezone', 'cutoffAt'];
 const outcomeTokens = [...contextTokens, 'options', 'certainOptions', 'tiedOptions', 'remainingSeats', 'medianOptions', 'modeOptions', 'total', 'unit'];
@@ -42,7 +42,7 @@ export const POLL_TEMPLATE_MAX_LENGTH = 14_000;
 /** @operatorConsoleSamples Example values for token buttons and preview only. */
 export const pollTemplateSamples: Record<string, string> = {
   pollId: 'poll-example', question: 'Morning or afternoon?', timezone: 'Europe/Lisbon', cutoffAt: '12:22:57',
-  deliveryNotice: '@all — poll published in this group.', options: 'Afternoon', purpose: 'Decision', rule: 'Most votes',
+  deliveryNotice: 'poll published in this group.', options: 'Afternoon', purpose: 'Decision', rule: 'Most votes',
   closing: '12:22:57', closesAt: '12:22:57', quorum: '50%', tiePolicy: 'Authorized choice', ballotDelivery: 'Group',
   voterDisclosure: 'Named', activationTimeout: '120 minutes', postVoteAction: 'The selected option updates the event.',
   ordinal: '1', label: 'Afternoon', option: 'Afternoon', outcome: 'Selected: Afternoon', responseCount: '2',
@@ -52,22 +52,66 @@ export const pollTemplateSamples: Record<string, string> = {
   total: '2', unit: 'items', resolver: 'Ana'
 };
 
+const numericTokens = new Set(['ordinal', 'count', 'responseCount', 'eligibleCount', 'turnoutPercent', 'respondentPercent', 'eligiblePercent', 'remainingSeats', 'total', 'activationTimeout']);
+const choiceOptions: Record<string, Array<{ value: string; label: string }>> = {
+  ballotDelivery: [{ value: 'private', label: 'Private' }, { value: 'group', label: 'Group' }],
+  voterDisclosure: [{ value: 'named', label: 'Named' }, { value: 'hidden', label: 'Hidden' }],
+  purpose: [{ value: 'decide', label: 'Decision' }, { value: 'measure', label: 'Measurement' }, { value: 'count', label: 'Count' }],
+  rule: [
+    { value: 'plurality', label: 'Most votes' }, { value: 'approval', label: 'Approval' },
+    { value: 'single_non_transferable', label: 'Single non-transferable vote' }, { value: 'multiwinner_approval', label: 'Multiple winners by approval' },
+    { value: 'approve_reject', label: 'Approve or reject' }, { value: 'distribution', label: 'Distribution' },
+    { value: 'ordered_scale', label: 'Ordered scale' }, { value: 'sum', label: 'Sum' }
+  ],
+  tiePolicy: [
+    { value: 'no_decision', label: 'No decision' }, { value: 'authorized_choice', label: 'Authorized choice' },
+    { value: 'status_quo', label: 'Status quo' }, { value: 'random_draw', label: 'Random draw' }
+  ]
+};
+export function pollTemplateFields(kind: PollTemplateKind): TemplateConditionVariable[] {
+  return pollTemplateDefinitions[kind].tokens.map(token => ({ token,
+    label: token.replace(/([A-Z])/g, ' $1').replace(/^./, letter => letter.toUpperCase()), sampleValue: pollTemplateSamples[token] ?? '',
+    valueType: numericTokens.has(token) ? 'number' : choiceOptions[token] ? 'enum' : 'text', optional: true,
+    ...(numericTokens.has(token) ? { conditionSampleValue: Number(pollTemplateSamples[token]?.replace(/[^0-9.-]/g, '') || 1), ...(token === 'activationTimeout' ? { unit: 'minutes' } : {}) } : {}),
+    ...(choiceOptions[token] ? { options: choiceOptions[token], conditionSampleValue: choiceOptions[token]![0]!.value } : {})
+  }));
+}
+export function pollValueTemplateDefinition(kind: PollTemplateKind): ValueTemplateDefinition {
+  return { variables: pollTemplateFields(kind), allowDefault: true, mentions: {
+    people: true, groups: true, all: true, targets: [
+      { id: 'creator', label: 'Poll creator' }, { id: 'eligibleVoters', label: 'Eligible voters', description: 'Captured electorate, excluding the bot' },
+      { id: 'currentGroup', label: 'Current group' }, ...(kind === 'tieResolved' ? [{ id: 'resolver', label: 'Tie resolver' }] : [])
+    ]
+  } };
+}
+export const POLL_DEFAULT_PUBLICATION = '{{mention target "eligibleVoters" "Eligible voters"}}\n{{default}}';
+
 export const pollTemplateDefaultMessages: Record<string, string> = Object.fromEntries(
   Object.entries(pollTemplateDefinitions).map(([kind, definition]) => [`official.poll-assistant.template.${kind}`, definition.source])
 );
 
 const templateShape = Object.fromEntries(Object.keys(pollTemplateDefinitions).map((kind) => [kind, z.string().default('')])) as Record<PollTemplateKind, z.ZodDefault<z.ZodString>>;
 
-export const pollMessageSettingsSchema = z.object({
+export const pollMessageSettingsSchema = z.preprocess(migrateLegacyPollMessageSettings, z.object({
   ...templateShape,
   activationEnabled: z.boolean().default(false),
-  mentionEligible: z.boolean().default(true)
-}).strict().default({});
+  templateVersion: z.literal(2).default(2)
+}).strict().default({}));
+
+/** Host migration persists this normalization before editors become available. */
+export function migrateLegacyPollMessageSettings(value: unknown): unknown {
+  const messages = value && typeof value === 'object' && !Array.isArray(value) ? { ...value as Record<string, unknown> } : {};
+  if (messages.templateVersion === 2) { delete messages.mentionEligible; return messages; }
+  const source = typeof messages.publication === 'string' && messages.publication.trim() ? messages.publication : '{{default}}';
+  messages.publication = messages.mentionEligible === false ? source : `${POLL_DEFAULT_PUBLICATION.split('\n')[0]}\n${source}`;
+  messages.templateVersion = 2; delete messages.mentionEligible;
+  return messages;
+}
 
 export function pollTemplateIssues(kind: PollTemplateKind, source: string): string[] {
   if (!source.trim()) return [];
   if ([...source].length > POLL_TEMPLATE_MAX_LENGTH) return [`Template exceeds ${POLL_TEMPLATE_MAX_LENGTH} characters`];
-  return validateConditionalTemplate(source, pollTemplateDefinitions[kind].tokens).map((issue) => issue.message);
+  return validateValueTemplate(source, pollValueTemplateDefinition(kind)).map((issue) => issue.message);
 }
 
 export function validatePollMessageSettings(settings: PollTemplateOverrides, ctx: z.RefinementCtx): void {
@@ -80,36 +124,39 @@ export function validatePollMessageSettings(settings: PollTemplateOverrides, ctx
 
 export interface PollTemplateDiagnostic { kind: PollTemplateKind; reason: string }
 
-export function renderPollTemplate(input: {
+export interface RenderPollTemplateInput {
   kind: PollTemplateKind;
   overrides?: PollTemplateOverrides | undefined;
-  values: Readonly<Record<string, string | number | undefined>>;
+  values: Readonly<Record<string, string | number | TemplateFragment | undefined>>;
+  conditionValues?: Readonly<Record<string, TemplateScalar | undefined>> | undefined;
   t: TranslateFn;
   diagnostic?: ((diagnostic: PollTemplateDiagnostic) => void) | undefined;
-}): string {
+}
+export function renderPollTemplateFragment(input: RenderPollTemplateInput): TemplateFragment {
   const definition = pollTemplateDefinitions[input.kind];
-  const values = Object.fromEntries(definition.tokens.map((token) => [token, input.values[token] === undefined ? undefined : String(input.values[token])]));
-  const report = (reason: string) => (input.diagnostic ?? ((diagnostic) => console.warn('Poll template fallback', diagnostic)))({ kind: input.kind, reason });
+  const values = Object.fromEntries(definition.tokens.map(token => [token, typeof input.values[token] === 'number' ? String(input.values[token]) : input.values[token]])) as Record<string, string | TemplateFragment | undefined>;
+  const raw = { ...Object.fromEntries(Object.entries(input.values).filter(([, value]) => typeof value === 'number')), ...input.conditionValues } as Record<string, TemplateScalar | undefined>;
+  const report = (reason: string) => (input.diagnostic ?? (diagnostic => console.warn('Poll template fallback', diagnostic)))({ kind: input.kind, reason });
+  const key = `official.poll-assistant.template.${input.kind}`;
+  const localized = input.t(key, Object.fromEntries(definition.tokens.map(token => [token, `{${token}}`])));
+  const defaultSource = localized !== key && !pollTemplateIssues(input.kind, localized).length ? localized : definition.source;
   const render = (source: string) => {
-    const issues = pollTemplateIssues(input.kind, source);
-    if (issues.length) throw new Error(issues.join('; '));
-    const result = renderConditionalTemplate(source, values).trim();
-    if (!result) throw new Error('Template rendered empty');
-    return result;
+    const fragment = trimTemplateFragment(renderValueTemplate(source, pollValueTemplateDefinition(input.kind), { displayValues: values, conditionValues: raw, defaultSource }));
+    if (!fragment.segments.length) throw new Error('Template rendered empty');
+    return fragment;
   };
   const override = input.overrides?.[input.kind];
   if (override?.trim()) {
-    try { return render(override); }
-    catch (error) { report(error instanceof Error ? error.message : String(error)); }
+    try { return render(override); } catch (error) { report(error instanceof Error ? error.message : String(error)); }
   }
-  const key = `official.poll-assistant.template.${input.kind}`;
-  // Preserve template tokens when obtaining the localized source; interpolate only after parsing it.
-  const localized = input.t(key, Object.fromEntries(definition.tokens.map((token) => [token, `{${token}}`])));
-  if (localized !== key) {
-    try { return render(localized); }
-    catch (error) { report(error instanceof Error ? error.message : String(error)); }
-  }
+  try { return render(defaultSource); } catch (error) { report(error instanceof Error ? error.message : String(error)); }
   return render(definition.source);
+}
+/** Text-only compatibility entrypoint. Production messages use the fragment API. */
+export function renderPollTemplate(input: RenderPollTemplateInput): string {
+  const fragment = renderPollTemplateFragment(input);
+  if (fragment.segments.some(segment => segment.kind === 'mention')) throw new Error('Mention templates require fragment delivery.');
+  return previewTemplateFragment(fragment);
 }
 
 /** Preserve every code point, splitting at line/word boundaries where possible. */

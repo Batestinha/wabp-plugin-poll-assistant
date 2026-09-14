@@ -13,7 +13,7 @@ import {
 } from './contracts/doas-poll-v1';
 import { enqueuePollDeliveryJob, enqueuePollFinalizeJob, pollRetryAt } from './jobs';
 import { calculatePollResult } from './resultCalculator';
-import { renderPollResultMessages } from './resultRendering';
+import { renderPollResultMessages, renderPollResultDeliveries } from './resultRendering';
 import { deliverPollRandomDrawAudit } from './randomDrawAudit';
 import { deliverPollPrivatePublicationAudit } from './privatePublicationAudit';
 import {
@@ -196,7 +196,7 @@ async function resultDeliveries(input: {
   ]);
   const config = parsePollAssistantConfig(configInput);
   const cutoffAtLabel = formatTimestamp(input.cutoffAt, config.timezone, localeResolution.locale);
-  const resultMessages = renderPollResultMessages({
+  const resultMessages = await renderPollResultDeliveries({
     definition: input.claim.poll.definition,
     result: input.result,
     ballots: input.ballots,
@@ -206,9 +206,9 @@ async function resultDeliveries(input: {
     templates: config.messages,
     locale: localeResolution.locale,
     t
-  });
+  }, input.context, input.claim.poll);
   const deliveryId = `poll-result:${input.roundId}`;
-  return resultMessages.map((text, index) => ({
+  return resultMessages.map((message, index) => ({
     id: index === 0 ? deliveryId : `${deliveryId}:page:${index + 1}`,
     kind: index === 0 && input.result.purpose === 'decide' && input.result.outcome.status === 'tie'
       ? 'tie' as const
@@ -217,7 +217,7 @@ async function resultDeliveries(input: {
       ? `result:${input.roundId}:v1`
       : `result:${input.roundId}:page:${index + 1}:v1`,
     chatId: input.claim.poll.chatId,
-    text,
+    ...message,
     idempotencyKey: index === 0
       ? `poll-assistant:result:${input.claim.poll.id}:${input.roundId}:v1`
       : `poll-assistant:result:${input.claim.poll.id}:${input.roundId}:page:${index + 1}:v1`,

@@ -1,3 +1,4 @@
+import { migratePollTemplates } from './templateMigration';
 import { type BotPlugin } from './runtime';
 import {
   registerPollAssistantCancellations,
@@ -10,6 +11,7 @@ import { registerPollAssistantServices } from './service';
 
 export const pollAssistantPlugin: BotPlugin = {
   manifest: pollAssistantManifest,
+  lifecycle: { onInstall: migratePollTemplates, onUpdate: migratePollTemplates },
   registerCommands(context) {
     registerPollAssistantCommands(context);
   },

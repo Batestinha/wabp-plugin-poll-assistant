@@ -261,9 +261,9 @@
   "official.poll-assistant.template.measuredScale": "Mediana: {medianOptions}; moda: {modeOptions}.",
   "official.poll-assistant.template.counted": "Total: {total} {unit}.",
   "official.poll-assistant.template.tieResolved": "Empate resolvido para «{question}»: {options}.",
-  "official.poll-assistant.announcement.delivery.group": "@all — sondagem publicada neste grupo.",
-  "official.poll-assistant.announcement.delivery.private": "@all — votação por mensagem privada.",
-  "official.poll-assistant.announcement.delivery.privateUnderway": "@all — envio dos boletins por mensagem privada ainda em curso.",
+  "official.poll-assistant.announcement.delivery.group": "sondagem publicada neste grupo.",
+  "official.poll-assistant.announcement.delivery.private": "votação por mensagem privada.",
+  "official.poll-assistant.announcement.delivery.privateUnderway": "envio dos boletins por mensagem privada ainda em curso.",
   "official.poll-assistant.announcement.delivery.actor": "A tua sondagem privada.",
   "official.poll-assistant.announcement.closing.afterFirstResponse": "{minutes} minutos após a primeira resposta de outro eleitor"
 }

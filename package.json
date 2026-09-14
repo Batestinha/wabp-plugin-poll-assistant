@@ -1,6 +1,6 @@
 {
   "name": "@wabs/plugin-poll-assistant",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "license": "MIT",
   "private": true,
@@ -33,7 +33,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@wabs/plugin-sdk": "file:vendor/wabs-plugin-sdk-0.3.7-b7600fd0d44f.tgz",
+    "@wabs/plugin-sdk": "file:vendor/wabs-plugin-sdk-0.3.16-b44eccf13337.tgz",
     "zod": "3.25.76"
   },
   "devDependencies": {

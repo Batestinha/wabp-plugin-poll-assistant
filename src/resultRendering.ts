@@ -1,7 +1,9 @@
+import { joinTemplateFragments, previewTemplateFragment, type TemplateFragment, type TemplateScalar } from '@wabs/plugin-sdk/templates';
+import { resolvePollMessage } from './templateDelivery';
 import type { TranslateFn } from '@wabs/plugin-sdk/i18n';
 import type { PollBallot, PollDefinition, PollElector, PollResult } from './domain';
 import { describePollRandomDraw } from './resultCalculator';
-import { paginatePollText, renderPollTemplate, type PollTemplateKind, type PollTemplateOverrides } from './templates';
+import { paginatePollText, renderPollTemplateFragment, type PollTemplateKind, type PollTemplateOverrides } from './templates';
 
 export const POLL_RESULT_MESSAGE_MAX_CODEPOINTS = 3_500;
 
@@ -24,31 +26,41 @@ export function renderPollResult(input: RenderPollResultInput): string {
 }
 
 export function renderPollResultMessages(input: RenderPollResultInput): string[] {
+  const fragment = renderPollResultFragment(input);
+  if (fragment.segments.some(segment => segment.kind === 'mention')) throw new Error('Mention templates require fragment delivery.');
+  return paginatePollText(previewTemplateFragment(fragment), POLL_RESULT_MESSAGE_MAX_CODEPOINTS);
+}
+
+export function renderPollResultDeliveries(input: RenderPollResultInput, context: Parameters<typeof resolvePollMessage>[0], poll: Parameters<typeof resolvePollMessage>[1]) {
+  return resolvePollMessage(context, poll, renderPollResultFragment(input));
+}
+
+export function renderPollResultFragment(input: RenderPollResultInput): TemplateFragment {
   const { definition, result, t, locale } = input;
   if (definition.id !== result.pollId || definition.purpose !== result.purpose) {
     throw new Error('Poll result does not match its definition.');
   }
   const labels = new Map(definition.options.map(option => [option.id, option.label]));
   const context = { question: definition.question, pollId: definition.id, cutoffAt: input.cutoffAtLabel, timezone: input.timezone };
-  const render = (kind: PollTemplateKind, values: Record<string, string | number | undefined>) => renderPollTemplate({
-    kind, overrides: input.templates, values: { ...context, ...values }, t
+  const render = (kind: PollTemplateKind, values: Record<string, string | number | TemplateFragment | undefined>, raw: Record<string, TemplateScalar | undefined> = {}) => renderPollTemplateFragment({
+    kind, overrides: input.templates, values: { ...context, ...values }, conditionValues: raw, t
   });
   const voters = definition.voterDisclosure === 'named' ? votersByOption(input) : new Map<string, string[]>();
   const number = new Intl.NumberFormat(locale, { maximumFractionDigits: 2 });
-  const optionResults = result.tallies.map(tally => render('resultOption', {
+  const optionResults = joinTemplateFragments(result.tallies.map(tally => render('resultOption', {
     ordinal: definition.options.find(option => option.id === tally.optionId)!.ordinal,
     option: requireOptionLabel(labels, tally.optionId),
     count: tally.count,
     respondentPercent: number.format(tally.respondentShareBasisPoints / 100),
     eligiblePercent: number.format(result.eligibleCount ? tally.count * 100 / result.eligibleCount : 0),
     voters: voters.get(tally.optionId)?.join(', ') || undefined
-  })).join('\n');
+  }, { respondentPercent: tally.respondentShareBasisPoints / 100, eligiblePercent: result.eligibleCount ? tally.count * 100 / result.eligibleCount : 0 })), '\n');
   const text = render('result', {
     outcome: renderOutcome(definition, result, labels, locale, render),
     responseCount: result.responseCount, eligibleCount: result.eligibleCount,
     turnoutPercent: number.format(result.turnoutBasisPoints / 100), optionResults
-  });
-  return paginatePollText(text, POLL_RESULT_MESSAGE_MAX_CODEPOINTS);
+  }, { turnoutPercent: result.turnoutBasisPoints / 100 });
+  return text;
 }
 
 function votersByOption(input: RenderPollResultInput): Map<string, string[]> {
@@ -94,8 +106,8 @@ function renderOutcome(
   result: PollResult,
   labels: ReadonlyMap<string, string>,
   locale: string,
-  render: (kind: PollTemplateKind, values: Record<string, string | number | undefined>) => string
-): string {
+  render: (kind: PollTemplateKind, values: Record<string, string | number | TemplateFragment | undefined>) => TemplateFragment
+): TemplateFragment {
   const list = (ids: readonly string[]) => new Intl.ListFormat(locale, { style: 'long', type: 'conjunction' }).format(ids.map(id => requireOptionLabel(labels, id)));
   if (result.outcome.status === 'quorum_not_met') return render('quorumNotMet', {});
   if (result.purpose === 'decide') {

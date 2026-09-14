@@ -4,8 +4,8 @@
   "name": "Poll Assistant",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "kind": "managed_group",
-  "version": "0.5.0",
-  "coreApiRange": "^0.3.0",
+  "version": "0.6.0",
+  "coreApiRange": "^0.3.6",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
   "descriptionKey": "official.poll-assistant.description",
@@ -264,7 +264,7 @@
       "resource": "transport.poll-history"
     }
   ],
-  "dataVersion": "6",
+  "dataVersion": "7",
   "assistant": {
     "summary": "Guided durable WhatsApp polls with operator presets, aggregate results, and confirmed lifecycle management.",
     "summaryKey": "official.poll-assistant.assistant.summary",
@@ -317,7 +317,6 @@
       "messages.counted",
       "messages.tieResolved",
       "messages.activationEnabled",
-      "messages.mentionEligible",
       "allowCreation",
       "allowMemberCreation",
       "timezone",
@@ -334,7 +333,8 @@
       "assistantExposeProvisionalResults",
       "automationWorkingHours.enabled",
       "automationWorkingHours.windows",
-      "creationPresets"
+      "creationPresets",
+      "messages.templateVersion"
     ],
     "controls": [
       {
@@ -353,163 +353,430 @@
           "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
           "widget": "text",
           "multiline": true,
-          "templateDialect": "conditional-presence-v1",
+          "templateDialect": "conditional-values-v2",
           "templateActivation": "always",
           "templateEmptyResult": "reject",
           "templateVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "deliveryNotice",
               "label": "Delivery Notice",
-              "sampleValue": "@all — poll published in this group."
+              "sampleValue": "poll published in this group.",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "purpose",
               "label": "Purpose",
-              "sampleValue": "Decision"
+              "sampleValue": "Decision",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "decide",
+                  "label": "Decision"
+                },
+                {
+                  "value": "measure",
+                  "label": "Measurement"
+                },
+                {
+                  "value": "count",
+                  "label": "Count"
+                }
+              ],
+              "conditionSampleValue": "decide"
             },
             {
               "token": "rule",
               "label": "Rule",
-              "sampleValue": "Most votes"
+              "sampleValue": "Most votes",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "plurality",
+                  "label": "Most votes"
+                },
+                {
+                  "value": "approval",
+                  "label": "Approval"
+                },
+                {
+                  "value": "single_non_transferable",
+                  "label": "Single non-transferable vote"
+                },
+                {
+                  "value": "multiwinner_approval",
+                  "label": "Multiple winners by approval"
+                },
+                {
+                  "value": "approve_reject",
+                  "label": "Approve or reject"
+                },
+                {
+                  "value": "distribution",
+                  "label": "Distribution"
+                },
+                {
+                  "value": "ordered_scale",
+                  "label": "Ordered scale"
+                },
+                {
+                  "value": "sum",
+                  "label": "Sum"
+                }
+              ],
+              "conditionSampleValue": "plurality"
             },
             {
               "token": "closing",
               "label": "Closing",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "quorum",
               "label": "Quorum",
-              "sampleValue": "50%"
+              "sampleValue": "50%",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiePolicy",
               "label": "Tie Policy",
-              "sampleValue": "Authorized choice"
+              "sampleValue": "Authorized choice",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "no_decision",
+                  "label": "No decision"
+                },
+                {
+                  "value": "authorized_choice",
+                  "label": "Authorized choice"
+                },
+                {
+                  "value": "status_quo",
+                  "label": "Status quo"
+                },
+                {
+                  "value": "random_draw",
+                  "label": "Random draw"
+                }
+              ],
+              "conditionSampleValue": "no_decision"
             },
             {
               "token": "ballotDelivery",
               "label": "Ballot Delivery",
-              "sampleValue": "Group"
+              "sampleValue": "Group",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "private",
+                  "label": "Private"
+                },
+                {
+                  "value": "group",
+                  "label": "Group"
+                }
+              ],
+              "conditionSampleValue": "private"
             },
             {
               "token": "voterDisclosure",
               "label": "Voter Disclosure",
-              "sampleValue": "Named"
+              "sampleValue": "Named",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "named",
+                  "label": "Named"
+                },
+                {
+                  "value": "hidden",
+                  "label": "Hidden"
+                }
+              ],
+              "conditionSampleValue": "named"
             },
             {
               "token": "activationTimeout",
               "label": "Activation Timeout",
-              "sampleValue": "120 minutes"
+              "sampleValue": "120 minutes",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 120,
+              "unit": "minutes"
             },
             {
               "token": "postVoteAction",
               "label": "Post Vote Action",
-              "sampleValue": "The selected option updates the event."
+              "sampleValue": "The selected option updates the event.",
+              "valueType": "text",
+              "optional": true
             }
           ],
           "templateConditionVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "deliveryNotice",
               "label": "Delivery Notice",
-              "sampleValue": "@all — poll published in this group."
+              "sampleValue": "poll published in this group.",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "purpose",
               "label": "Purpose",
-              "sampleValue": "Decision"
+              "sampleValue": "Decision",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "decide",
+                  "label": "Decision"
+                },
+                {
+                  "value": "measure",
+                  "label": "Measurement"
+                },
+                {
+                  "value": "count",
+                  "label": "Count"
+                }
+              ],
+              "conditionSampleValue": "decide"
             },
             {
               "token": "rule",
               "label": "Rule",
-              "sampleValue": "Most votes"
+              "sampleValue": "Most votes",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "plurality",
+                  "label": "Most votes"
+                },
+                {
+                  "value": "approval",
+                  "label": "Approval"
+                },
+                {
+                  "value": "single_non_transferable",
+                  "label": "Single non-transferable vote"
+                },
+                {
+                  "value": "multiwinner_approval",
+                  "label": "Multiple winners by approval"
+                },
+                {
+                  "value": "approve_reject",
+                  "label": "Approve or reject"
+                },
+                {
+                  "value": "distribution",
+                  "label": "Distribution"
+                },
+                {
+                  "value": "ordered_scale",
+                  "label": "Ordered scale"
+                },
+                {
+                  "value": "sum",
+                  "label": "Sum"
+                }
+              ],
+              "conditionSampleValue": "plurality"
             },
             {
               "token": "closing",
               "label": "Closing",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "quorum",
               "label": "Quorum",
-              "sampleValue": "50%"
+              "sampleValue": "50%",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiePolicy",
               "label": "Tie Policy",
-              "sampleValue": "Authorized choice"
+              "sampleValue": "Authorized choice",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "no_decision",
+                  "label": "No decision"
+                },
+                {
+                  "value": "authorized_choice",
+                  "label": "Authorized choice"
+                },
+                {
+                  "value": "status_quo",
+                  "label": "Status quo"
+                },
+                {
+                  "value": "random_draw",
+                  "label": "Random draw"
+                }
+              ],
+              "conditionSampleValue": "no_decision"
             },
             {
               "token": "ballotDelivery",
               "label": "Ballot Delivery",
-              "sampleValue": "Group"
+              "sampleValue": "Group",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "private",
+                  "label": "Private"
+                },
+                {
+                  "value": "group",
+                  "label": "Group"
+                }
+              ],
+              "conditionSampleValue": "private"
             },
             {
               "token": "voterDisclosure",
               "label": "Voter Disclosure",
-              "sampleValue": "Named"
+              "sampleValue": "Named",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "named",
+                  "label": "Named"
+                },
+                {
+                  "value": "hidden",
+                  "label": "Hidden"
+                }
+              ],
+              "conditionSampleValue": "named"
             },
             {
               "token": "activationTimeout",
               "label": "Activation Timeout",
-              "sampleValue": "120 minutes"
+              "sampleValue": "120 minutes",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 120,
+              "unit": "minutes"
             },
             {
               "token": "postVoteAction",
               "label": "Post Vote Action",
-              "sampleValue": "The selected option updates the event."
+              "sampleValue": "The selected option updates the event.",
+              "valueType": "text",
+              "optional": true
             }
           ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
           "placeholder": "{deliveryNotice}\n\nQuestion: {question}\nOptions:\n{options}\n\nPurpose: {purpose}\nRule: {rule}\nClosing: {closing}{{#if postVoteAction}}\n\n{postVoteAction}{{/if}}"
         },
         "dangerous": false,
@@ -545,43 +812,78 @@
           "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
           "widget": "text",
           "multiline": true,
-          "templateDialect": "conditional-presence-v1",
+          "templateDialect": "conditional-values-v2",
           "templateActivation": "always",
           "templateEmptyResult": "reject",
           "templateVariables": [
             {
               "token": "ordinal",
               "label": "Ordinal",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "label",
               "label": "Label",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "option",
               "label": "Option",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             }
           ],
           "templateConditionVariables": [
             {
               "token": "ordinal",
               "label": "Ordinal",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "label",
               "label": "Label",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "option",
               "label": "Option",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             }
           ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
           "placeholder": "{ordinal}. {label}"
         },
         "dangerous": false,
@@ -617,73 +919,118 @@
           "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
           "widget": "text",
           "multiline": true,
-          "templateDialect": "conditional-presence-v1",
+          "templateDialect": "conditional-values-v2",
           "templateActivation": "always",
           "templateEmptyResult": "reject",
           "templateVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "closing",
               "label": "Closing",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "closesAt",
               "label": "Closes At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             }
           ],
           "templateConditionVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "closing",
               "label": "Closing",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "closesAt",
               "label": "Closes At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             }
           ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
           "placeholder": "Closing time for «{question}»: {closing}"
         },
         "dangerous": false,
@@ -719,103 +1066,166 @@
           "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
           "widget": "text",
           "multiline": true,
-          "templateDialect": "conditional-presence-v1",
+          "templateDialect": "conditional-values-v2",
           "templateActivation": "always",
           "templateEmptyResult": "reject",
           "templateVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "outcome",
               "label": "Outcome",
-              "sampleValue": "Selected: Afternoon"
+              "sampleValue": "Selected: Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "responseCount",
               "label": "Response Count",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "eligibleCount",
               "label": "Eligible Count",
-              "sampleValue": "4"
+              "sampleValue": "4",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 4
             },
             {
               "token": "turnoutPercent",
               "label": "Turnout Percent",
-              "sampleValue": "50"
+              "sampleValue": "50",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 50
             },
             {
               "token": "optionResults",
               "label": "Option Results",
-              "sampleValue": "Afternoon: 2 responses (100% of respondents) (Ana, Rui)"
+              "sampleValue": "Afternoon: 2 responses (100% of respondents) (Ana, Rui)",
+              "valueType": "text",
+              "optional": true
             }
           ],
           "templateConditionVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "outcome",
               "label": "Outcome",
-              "sampleValue": "Selected: Afternoon"
+              "sampleValue": "Selected: Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "responseCount",
               "label": "Response Count",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "eligibleCount",
               "label": "Eligible Count",
-              "sampleValue": "4"
+              "sampleValue": "4",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 4
             },
             {
               "token": "turnoutPercent",
               "label": "Turnout Percent",
-              "sampleValue": "50"
+              "sampleValue": "50",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 50
             },
             {
               "token": "optionResults",
               "label": "Option Results",
-              "sampleValue": "Afternoon: 2 responses (100% of respondents) (Ana, Rui)"
+              "sampleValue": "Afternoon: 2 responses (100% of respondents) (Ana, Rui)",
+              "valueType": "text",
+              "optional": true
             }
           ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
           "placeholder": "Poll closed: «{question}»\n\n*{outcome}*\n\nResponses: {responseCount} of {eligibleCount} eligible voters ({turnoutPercent}%)\n\n{optionResults}"
         },
         "dangerous": false,
@@ -851,73 +1261,126 @@
           "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
           "widget": "text",
           "multiline": true,
-          "templateDialect": "conditional-presence-v1",
+          "templateDialect": "conditional-values-v2",
           "templateActivation": "always",
           "templateEmptyResult": "reject",
           "templateVariables": [
             {
               "token": "ordinal",
               "label": "Ordinal",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "option",
               "label": "Option",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "count",
               "label": "Count",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "respondentPercent",
               "label": "Respondent Percent",
-              "sampleValue": "100"
+              "sampleValue": "100",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 100
             },
             {
               "token": "eligiblePercent",
               "label": "Eligible Percent",
-              "sampleValue": "50"
+              "sampleValue": "50",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 50
             },
             {
               "token": "voters",
               "label": "Voters",
-              "sampleValue": "Ana, Rui"
+              "sampleValue": "Ana, Rui",
+              "valueType": "text",
+              "optional": true
             }
           ],
           "templateConditionVariables": [
             {
               "token": "ordinal",
               "label": "Ordinal",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "option",
               "label": "Option",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "count",
               "label": "Count",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "respondentPercent",
               "label": "Respondent Percent",
-              "sampleValue": "100"
+              "sampleValue": "100",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 100
             },
             {
               "token": "eligiblePercent",
               "label": "Eligible Percent",
-              "sampleValue": "50"
+              "sampleValue": "50",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 50
             },
             {
               "token": "voters",
               "label": "Voters",
-              "sampleValue": "Ana, Rui"
+              "sampleValue": "Ana, Rui",
+              "valueType": "text",
+              "optional": true
             }
           ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
           "placeholder": "{option}: {count} response(s) ({respondentPercent}% of respondents){{#if voters}} ({voters}){{/if}}"
         },
         "dangerous": false,
@@ -953,133 +1416,206 @@
           "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
           "widget": "text",
           "multiline": true,
-          "templateDialect": "conditional-presence-v1",
+          "templateDialect": "conditional-values-v2",
           "templateActivation": "always",
           "templateEmptyResult": "reject",
           "templateVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
           "templateConditionVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
           "placeholder": "Selected: {options}"
         },
         "dangerous": false,
@@ -1115,133 +1651,206 @@
           "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
           "widget": "text",
           "multiline": true,
-          "templateDialect": "conditional-presence-v1",
+          "templateDialect": "conditional-values-v2",
           "templateActivation": "always",
           "templateEmptyResult": "reject",
           "templateVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
           "templateConditionVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
           "placeholder": "Selected by random draw: {options}"
         },
         "dangerous": false,
@@ -1277,133 +1886,206 @@
           "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
           "widget": "text",
           "multiline": true,
-          "templateDialect": "conditional-presence-v1",
+          "templateDialect": "conditional-values-v2",
           "templateActivation": "always",
           "templateEmptyResult": "reject",
           "templateVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
           "templateConditionVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
           "placeholder": "Tie: {tiedOptions}{{#if certainOptions}}; already selected: {certainOptions}{{/if}}. Remaining places: {remainingSeats}."
         },
         "dangerous": false,
@@ -1439,133 +2121,206 @@
           "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
           "widget": "text",
           "multiline": true,
-          "templateDialect": "conditional-presence-v1",
+          "templateDialect": "conditional-values-v2",
           "templateActivation": "always",
           "templateEmptyResult": "reject",
           "templateVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
           "templateConditionVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
           "placeholder": "No decision: {tiedOptions}{{#if certainOptions}}; already selected: {certainOptions}{{/if}}."
         },
         "dangerous": false,
@@ -1601,133 +2356,206 @@
           "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
           "widget": "text",
           "multiline": true,
-          "templateDialect": "conditional-presence-v1",
+          "templateDialect": "conditional-values-v2",
           "templateActivation": "always",
           "templateEmptyResult": "reject",
           "templateVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
           "templateConditionVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
           "placeholder": "Insufficient turnout."
         },
         "dangerous": false,
@@ -1763,133 +2591,206 @@
           "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
           "widget": "text",
           "multiline": true,
-          "templateDialect": "conditional-presence-v1",
+          "templateDialect": "conditional-values-v2",
           "templateActivation": "always",
           "templateEmptyResult": "reject",
           "templateVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
           "templateConditionVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
           "placeholder": "Responses measured."
         },
         "dangerous": false,
@@ -1925,133 +2826,206 @@
           "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
           "widget": "text",
           "multiline": true,
-          "templateDialect": "conditional-presence-v1",
+          "templateDialect": "conditional-values-v2",
           "templateActivation": "always",
           "templateEmptyResult": "reject",
           "templateVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
           "templateConditionVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
           "placeholder": "Median: {medianOptions}; mode: {modeOptions}."
         },
         "dangerous": false,
@@ -2087,133 +3061,206 @@
           "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
           "widget": "text",
           "multiline": true,
-          "templateDialect": "conditional-presence-v1",
+          "templateDialect": "conditional-values-v2",
           "templateActivation": "always",
           "templateEmptyResult": "reject",
           "templateVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
           "templateConditionVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             }
           ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
           "placeholder": "Counted: {total} {unit}."
         },
         "dangerous": false,
@@ -2249,143 +3296,224 @@
           "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
           "widget": "text",
           "multiline": true,
-          "templateDialect": "conditional-presence-v1",
+          "templateDialect": "conditional-values-v2",
           "templateActivation": "always",
           "templateEmptyResult": "reject",
           "templateVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "resolver",
               "label": "Resolver",
-              "sampleValue": "Ana"
+              "sampleValue": "Ana",
+              "valueType": "text",
+              "optional": true
             }
           ],
           "templateConditionVariables": [
             {
               "token": "pollId",
               "label": "Poll Id",
-              "sampleValue": "poll-example"
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "question",
               "label": "Question",
-              "sampleValue": "Morning or afternoon?"
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "timezone",
               "label": "Timezone",
-              "sampleValue": "Europe/Lisbon"
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "cutoffAt",
               "label": "Cutoff At",
-              "sampleValue": "12:22:57"
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "options",
               "label": "Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "certainOptions",
               "label": "Certain Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "tiedOptions",
               "label": "Tied Options",
-              "sampleValue": "Morning and afternoon"
+              "sampleValue": "Morning and afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "remainingSeats",
               "label": "Remaining Seats",
-              "sampleValue": "1"
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
             },
             {
               "token": "medianOptions",
               "label": "Median Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "modeOptions",
               "label": "Mode Options",
-              "sampleValue": "Afternoon"
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "total",
               "label": "Total",
-              "sampleValue": "2"
+              "sampleValue": "2",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 2
             },
             {
               "token": "unit",
               "label": "Unit",
-              "sampleValue": "items"
+              "sampleValue": "items",
+              "valueType": "text",
+              "optional": true
             },
             {
               "token": "resolver",
               "label": "Resolver",
-              "sampleValue": "Ana"
+              "sampleValue": "Ana",
+              "valueType": "text",
+              "optional": true
             }
           ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              },
+              {
+                "id": "resolver",
+                "label": "Tie resolver"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
           "placeholder": "Tie resolved for «{question}»: {options}."
         },
         "dangerous": false,
@@ -2418,38 +3546,6 @@
         },
         "ui": {
           "helpText": "Send a separate closing-time announcement after activation. New announcements are disabled by default.",
-          "widget": "toggle"
-        },
-        "dangerous": false,
-        "sensitivity": {
-          "sensitive": false,
-          "redact": "none"
-        },
-        "relatedCommandIds": [
-          "/poll",
-          "/poll create",
-          "/poll list",
-          "/poll status",
-          "/poll open",
-          "/poll close",
-          "/poll cancel",
-          "/poll resolve"
-        ],
-        "relatedActionIds": []
-      },
-      {
-        "pluginId": "official.poll-assistant",
-        "path": "messages.mentionEligible",
-        "id": "plugin.official.poll-assistant.messages.mentionEligible",
-        "label": "Notify eligible voters",
-        "description": "Include actual mentions of eligible voters in new publication announcements, excluding the bot.",
-        "section": "Messages",
-        "order": 521,
-        "schema": {
-          "type": "boolean"
-        },
-        "ui": {
-          "helpText": "Include actual mentions of eligible voters in new publication announcements, excluding the bot.",
           "widget": "toggle"
         },
         "dangerous": false,
@@ -3106,7 +4202,12 @@
         "relatedActionIds": []
       }
     ],
-    "internalConfigPaths": []
+    "internalConfigPaths": [
+      {
+        "path": "messages.templateVersion",
+        "reason": "Persisted template migration version; managed by the plugin lifecycle."
+      }
+    ]
   },
   "workflowActions": [
     {

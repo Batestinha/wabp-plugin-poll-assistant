@@ -43,7 +43,7 @@ function seed(db) {
     roundId: 'fixture-round', publishIdempotencyKey: 'fixture-publish', maxActivePollsPerChat: 10, createdAt: timestamp });
 }
 
-test('data version 6 retains old deliveries and identifiers, then reloads frozen new writes after restart', () => {
+test('data version 7 retains old deliveries and identifiers, then reloads frozen new writes after restart', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wabs-poll-fixture-'));
   let db;
   try {
@@ -61,6 +61,8 @@ test('data version 6 retains old deliveries and identifiers, then reloads frozen
     const next = { ...db.get('SELECT * FROM poll_deliveries WHERE id = ?', 'old-delivery') };
     assert.equal(next.mentioned_wids_json, '[]');
     delete next.mentioned_wids_json;
+    assert.equal(next.template_mentions_json, '{}');
+    delete next.template_mentions_json;
     assert.deepEqual(next, old);
     assert.equal(db.get('SELECT definition_json FROM polls').definition_json, priorDefinition);
     assert.deepEqual(getPollDelivery(db, 'old-delivery').mentionedWids ?? [], []);
@@ -109,9 +111,12 @@ test('stored settings and template overrides survive parsing, while invalid save
   const original = JSON.stringify(custom);
   const parsed = plugin.manifest.configSchema.parse(custom);
   assert.equal(parsed.maxActivePollsPerChat, 7);
-  for (const [key, value] of Object.entries(custom.messages)) assert.equal(parsed.messages[key], value);
+  for (const [key, value] of Object.entries(custom.messages)) if (key !== 'mentionEligible') assert.equal(parsed.messages[key], value);
+  assert.equal(parsed.messages.mentionEligible, undefined);
+  assert.equal(parsed.messages.templateVersion, 2);
+  assert.equal(parsed.messages.publication, '{{default}}');
   assert.equal(JSON.stringify(custom), original);
-  assert.throws(() => plugin.manifest.configSchema.parse({ messages: { result: '{unknown}' } }), /unknown template variable/);
+  assert.throws(() => plugin.manifest.configSchema.parse({ messages: { result: '{unknown}' } }), /unknown template variable/i);
   const legacy = { messages: { result: '{unknown}' } };
   const diagnostics = [];
   const text = renderPollTemplate({ kind: 'result', t, values: pollTemplateSamples,
@@ -142,11 +147,34 @@ test('long result pages preserve every Unicode codepoint and blank overrides res
 
 test('the archive retains every SQL migration and all declared translations and controls', () => {
   const metadata = require('../wa-plugin.json');
-  assert.equal(metadata.dataVersion, '6');
+  assert.equal(metadata.dataVersion, '7');
   assert.equal(metadata.databases[0].name, 'polls');
-  assert.equal(migrations.length, 6);
+  assert.equal(migrations.length, 7);
   for (const migration of migrations) assert.equal(fs.readFileSync(path.join('migrations/polls', migration), 'utf8'), fs.readFileSync(path.join('src/migrations/polls', migration), 'utf8'));
   for (const key of Object.keys(plugin.manifest.defaultMessages)) assert.ok(pt[key]?.trim(), key);
-  assert.equal(plugin.lifecycle, undefined);
+  assert.equal(typeof plugin.lifecycle.onUpdate, 'function');
   assert.ok(metadata.operatorConsole.controls.length > 20);
+});
+
+test('publication pages are atomic and retries keep their original text and page-local recipients', () => {
+  const { ensurePollLifecycleDeliveryBatch } = require('../dist/store');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wabs-poll-fixture-'));
+  const db = open(path.join(directory, 'polls.sqlite'));
+  try {
+    migrate(db, migrations); seed(db);
+    const inputs = [0, 1].map(index => ({ pollId: 'fixture-poll', roundId: 'fixture-round', createdAt: timestamp,
+      activationAnnouncementEnabled: false, reuseExistingAnnouncement: true,
+      delivery: { id: index ? 'page-2' : 'poll-announcement:fixture-round:published', kind: 'announcement', deliveryKey: 'page-' + index,
+        chatId: '123@g.us', text: index ? '@456@g.us' : '@123 @all', mentionedWids: index ? [] : ['123@c.us'],
+        ...(index ? { groupMentions: [{ groupJid: '456@g.us', groupSubject: 'Walks' }] } : { mentionAll: true }),
+        idempotencyKey: 'page-' + index, deliveryBatchKey: 'frozen-batch', deliverySequence: index } }));
+    assert.throws(() => ensurePollLifecycleDeliveryBatch(db, [inputs[0], { ...inputs[1], delivery: { ...inputs[1].delivery, text: '' } }]));
+    assert.equal(getPollDelivery(db, inputs[0].delivery.id), undefined);
+    ensurePollLifecycleDeliveryBatch(db, inputs);
+    const before = db.all('SELECT * FROM poll_deliveries ORDER BY id').map(row => ({ ...row }));
+    ensurePollLifecycleDeliveryBatch(db, inputs.map(input => ({ ...input, delivery: { ...input.delivery, text: 'New config', mentionedWids: [] } })));
+    assert.deepEqual(db.all('SELECT * FROM poll_deliveries ORDER BY id').map(row => ({ ...row })), before);
+    assert.deepEqual(getPollDelivery(db, 'page-2').groupMentions, inputs[1].delivery.groupMentions);
+    assert.equal(getPollDelivery(db, 'poll-announcement:fixture-round:published').mentionAll, true);
+  } finally { db.close(); fs.rmSync(directory, { recursive: true, force: true }); }
 });

@@ -9,3 +9,23 @@ Scope clocks supply default timezones. Existing UTC deadlines remain fixed. Poll
 WABP supplies database connections and migrations, scoped storage, workflow execution, authorization, transport and job persistence. This package contains the portable SDK, exact runtime dependencies, SQL migrations, Portuguese translations and an unmodified DOAS poll contract. Source commits, checksums and licenses are recorded in `provenance.json` and `contracts/`.
 
 Run `npm ci --ignore-scripts`, `npm test` and `npm run release:archive`. CI tests Node 22.23.2 and 24.15.0, reproduces the archive twice and loads it outside the repository. Tests use local fixture databases and mocked effects. Installation and scope enablement are separate operations; trusted registry signatures identify immutable release bytes.
+
+## Typed templates and WhatsApp mentions
+
+Message editors support exact choice and text comparisons, numeric thresholds,
+boolean values, availability checks, nested All/Any rules and Otherwise branches.
+Existing bare conditions retain their original presence meaning. Comparisons use
+canonical values separately from translated display text; missing values do not
+satisfy negative comparisons, while zero and false remain available.
+
+Type `@` in a supported message body or caption to insert a person, a group link,
+or a contextual recipient. Group links and native all-members mentions are distinct;
+the editor only offers targets supported by that destination. Mentions in hidden
+branches do not resolve or notify anyone. Native poll titles/options, group names
+and calendar text remain plain text. Durable delivery stores rendered text and
+recipient metadata together so retries keep the original notification intent.
+
+Publication notification settings migrate once to an Eligible voters mention chip,
+preserving effective scope/identity overrides and custom prose. The host backs up
+all original layers in the same transaction. `{{default}}` preserves the localized
+default message; the old decorative `@all —` delivery notice prefix is removed.

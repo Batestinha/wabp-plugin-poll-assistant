@@ -1,4 +1,5 @@
-import { paginatePollText, renderPollTemplate } from './templates';
+import { renderPollTemplateFragment } from './templates';
+import { resolvePollMessage } from './templateDelivery';
 import { createHash } from 'node:crypto';
 import { previewAssistantFlow } from '@wabs/plugin-sdk/flow-preview';
 import { createPollCreationFlowDefinition, pollCreationPresetInitialData } from './flow';
@@ -1140,15 +1141,15 @@ async function resolvePollLifecycleTie(context: PluginCommandContext, ctx: Comma
   const resolvedAt = new Date();
   const config = parsePollAssistantConfig(await runtime.configFor(lookup.aggregate.poll.scopeId));
   const locale = (await context.i18n.resolveScopeLocale(lookup.aggregate.poll.scopeId)).locale;
-  const messages = paginatePollText(renderPollTemplate({ kind: 'tieResolved', overrides: config.messages, t: groupT, values: {
+  const messages = await resolvePollMessage(runtime, lookup.aggregate.poll, renderPollTemplateFragment({ kind: 'tieResolved', overrides: config.messages, t: groupT, values: {
     question: definition.question, pollId: definition.id, timezone: config.timezone,
     cutoffAt: round.closesAt ? formatTimestamp(round.closesAt, config.timezone, locale) : undefined,
     options: selectedOptions.map(option => option.label).join(', '), resolver: ctx.message.senderDisplayName || actor.canonicalWid
-  } }));
-  const deliveries = messages.map((text, index) => ({
+  } }), { resolver: [{ identityId: actor.identityId, wid: actor.canonicalWid }] });
+  const deliveries = messages.map((message, index) => ({
     id: index === 0 ? deliveryId : `${deliveryId}:page:${index + 1}`, kind: 'result' as const,
     deliveryKey: index === 0 ? deliveryId : `${deliveryId}:page:${index + 1}`,
-    chatId: lookup.aggregate.poll.chatId, text,
+    chatId: lookup.aggregate.poll.chatId, ...message,
     idempotencyKey: index === 0 ? deliveryId : `${deliveryId}:page:${index + 1}`,
     deliveryBatchKey: deliveryId, deliverySequence: index,
     ...(index ? { notBefore: new Date(resolvedAt.getTime() + index * 2_000).toISOString() } : {})

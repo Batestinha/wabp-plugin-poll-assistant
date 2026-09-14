@@ -228,6 +228,9 @@ export interface RecoverablePollRound {
 }
 
 export interface PollDeliveryIntent {
+  inlineMentions?: boolean | undefined;
+  mentionAll?: boolean | undefined;
+  groupMentions?: Array<{ groupJid: string; groupSubject: string }> | undefined;
   mentionedWids?: readonly string[] | undefined;
   id: string;
   kind: PollDeliveryKind;
@@ -381,6 +384,7 @@ interface BallotRow extends PluginDatabaseRow {
 
 interface DeliveryRow extends PluginDatabaseRow {
   mentioned_wids_json: string;
+  template_mentions_json: string;
   id: string;
   poll_id: string;
   round_id: string;
@@ -3914,11 +3918,35 @@ export function ensurePollLifecycleDelivery(db: PluginDatabase, input: {
   activationAnnouncementEnabled?: boolean | undefined;
   reuseExistingAnnouncement?: boolean | undefined;
 }): StoredPollDelivery {
+  return db.transaction(() => ensurePollLifecycleDeliveryInTransaction(db, input));
+}
+
+export function ensurePollLifecycleDeliveryBatch(db: PluginDatabase, inputs: Parameters<typeof ensurePollLifecycleDelivery>[1][]): StoredPollDelivery[] {
+  if (!inputs.length) throw new Error('An announcement batch needs a message.');
+  return db.transaction(() => {
+    const first = inputs[0]!;
+    const frozen = getPollDelivery(db, first.delivery.id);
+    if (frozen) {
+      if (frozen.pollId !== first.pollId || frozen.roundId !== first.roundId || frozen.idempotencyKey !== first.delivery.idempotencyKey) throw new Error('Announcement batch belongs to another publication.');
+      return [frozen];
+    }
+    const sequence = db.get<{ sequence: number }>('SELECT COALESCE(MAX(delivery_sequence), -1) + 1 AS sequence FROM poll_deliveries WHERE delivery_batch_key = ?', first.delivery.deliveryBatchKey!)!.sequence;
+    return inputs.map((item, index) => ensurePollLifecycleDeliveryInTransaction(db, { ...item, delivery: { ...item.delivery, deliverySequence: sequence + index } }));
+  });
+}
+
+function ensurePollLifecycleDeliveryInTransaction(db: PluginDatabase, input: {
+  pollId: string;
+  roundId: string;
+  delivery: PollDeliveryIntent;
+  createdAt: string;
+  activationAnnouncementEnabled?: boolean | undefined;
+  reuseExistingAnnouncement?: boolean | undefined;
+}): StoredPollDelivery {
   const createdAt = timestampSchema.parse(input.createdAt);
   validateDeliveryIntent(input.delivery);
   if (input.activationAnnouncementEnabled !== undefined && input.delivery.kind !== 'announcement') throw new Error('Only a publication can capture its activation announcement policy');
   if (input.reuseExistingAnnouncement && !['announcement', 'activation'].includes(input.delivery.kind)) throw new Error('Frozen announcement reuse is only valid for announcements');
-  return db.transaction(() => {
     const existing = getPollDelivery(db, input.delivery.id);
     if (existing) {
       if (
@@ -3928,7 +3956,8 @@ export function ensurePollLifecycleDelivery(db: PluginDatabase, input: {
         || existing.deliveryKey !== input.delivery.deliveryKey
         || existing.chatId !== input.delivery.chatId
         || (!input.reuseExistingAnnouncement && (existing.text !== input.delivery.text
-          || JSON.stringify(normalizedMentionRecipients(existing.mentionedWids)) !== JSON.stringify(normalizedMentionRecipients(input.delivery.mentionedWids))))
+          || JSON.stringify(normalizedMentionRecipients(existing.mentionedWids)) !== JSON.stringify(normalizedMentionRecipients(input.delivery.mentionedWids))
+          || JSON.stringify(normalizedTemplateMentions(existing)) !== JSON.stringify(normalizedTemplateMentions(input.delivery))))
         || existing.idempotencyKey !== input.delivery.idempotencyKey
         || existing.deliveryBatchKey !== input.delivery.deliveryBatchKey
         || existing.deliverySequence !== input.delivery.deliverySequence
@@ -3943,8 +3972,8 @@ export function ensurePollLifecycleDelivery(db: PluginDatabase, input: {
     insertDelivery(db, input.pollId, input.roundId, input.delivery, createdAt);
     if (input.activationAnnouncementEnabled === false) suppressPollActivationAnnouncement(db, input.roundId, createdAt);
     return getPollDelivery(db, input.delivery.id)!;
-  });
 }
+
 
 export class PollActivationAnnouncementSuppressedError extends Error {
   constructor(roundId: string) { super(`Activation announcement suppressed for ${roundId}`); }
@@ -4100,8 +4129,8 @@ function insertDelivery(
     `INSERT INTO poll_deliveries (
        id, poll_id, round_id, kind, delivery_key, chat_id, text,
        idempotency_key, status, next_attempt_at, delivery_batch_key,
-       delivery_sequence, mentioned_wids_json, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
+       delivery_sequence, mentioned_wids_json, template_mentions_json, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`,
     delivery.id,
     pollId,
     roundId,
@@ -4114,9 +4143,18 @@ function insertDelivery(
     delivery.deliveryBatchKey ?? null,
     delivery.deliverySequence ?? null,
     JSON.stringify(normalizedMentionRecipients(delivery.mentionedWids)),
+    JSON.stringify(normalizedTemplateMentions(delivery)),
     createdAt,
     createdAt
   );
+}
+
+function normalizedTemplateMentions(value: { inlineMentions?: boolean | undefined; mentionAll?: boolean | undefined; groupMentions?: Array<{ groupJid: string; groupSubject: string }> | undefined }) {
+  const groups = z.array(z.object({ groupJid: z.string().endsWith('@g.us'), groupSubject: z.string().min(1) }).strict()).max(1000).parse(value.groupMentions ?? []);
+  const unique = [...new Map(groups.map(group => [group.groupJid, group])).values()].sort((a, b) => a.groupJid.localeCompare(b.groupJid));
+  if (value.mentionAll !== undefined) z.boolean().parse(value.mentionAll);
+  if (value.inlineMentions !== undefined) z.boolean().parse(value.inlineMentions);
+  return { ...(value.inlineMentions ? { inlineMentions: true } : {}), ...(value.mentionAll ? { mentionAll: true } : {}), ...(unique.length ? { groupMentions: unique } : {}) };
 }
 
 function normalizedMentionRecipients(value: readonly string[] | undefined): string[] {
@@ -4137,9 +4175,9 @@ function validateResultDeliveryBatch(primary: PollDeliveryIntent, additional: re
 }
 
 function validateDeliveryIntent(delivery: PollDeliveryIntent): void {
-  if (normalizedMentionRecipients(delivery.mentionedWids).length && delivery.kind !== 'announcement') {
-    throw new Error('Only publication announcements may notify eligible voters.');
-  }
+  normalizedMentionRecipients(delivery.mentionedWids);
+  normalizedTemplateMentions(delivery);
+  if (delivery.mentionAll && !delivery.chatId.endsWith('@g.us')) throw new Error('All-members mentions require a group destination.');
 
   required(delivery.id, 'delivery.id');
   required(delivery.deliveryKey, 'delivery.deliveryKey');
@@ -4369,6 +4407,7 @@ function deliveryFromRow(row: DeliveryRow): StoredPollDelivery {
   const mentionedWids = normalizedMentionRecipients(JSON.parse(row.mentioned_wids_json));
   return {
     ...(mentionedWids.length ? { mentionedWids } : {}),
+    ...normalizedTemplateMentions(JSON.parse(row.template_mentions_json ?? '{}')),
     id: row.id,
     pollId: row.poll_id,
     roundId: row.round_id,

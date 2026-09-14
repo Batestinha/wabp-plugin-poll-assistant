@@ -6,7 +6,7 @@ import { parsePollAssistantConfig } from './config';
 import { pollAllowsMultipleAnswers, type PollBallot } from './domain';
 import { enqueuePollDeliveryJob, enqueuePollPublishJob } from './jobs';
 import { calculatePollResult } from './resultCalculator';
-import { renderPollResultMessages } from './resultRendering';
+import { renderPollResultMessages, renderPollResultDeliveries } from './resultRendering';
 import {
   POLL_ASSISTANT_AUTOMATION_SERVICE_ID,
   POLL_ASSISTANT_CANCEL_POLL_METHOD,
@@ -339,7 +339,7 @@ async function resolveActorOutcome(
   ]);
   const config = parsePollAssistantConfig(configInput);
   const deliveryId = `poll-result:${round.id}`;
-  const messages = renderPollResultMessages({
+  const messages = await renderPollResultDeliveries({
         definition: aggregate.poll.definition,
         result,
         ballots: [ballot],
@@ -361,11 +361,11 @@ async function resolveActorOutcome(
         templates: config.messages,
         locale: localeResolution.locale,
         t
-      });
-  const deliveries = messages.map((text, index) => ({
+      }, context, aggregate.poll);
+  const deliveries = messages.map((message, index) => ({
     id: index === 0 ? deliveryId : `${deliveryId}:page:${index + 1}`, kind: 'result' as const,
     deliveryKey: index === 0 ? `result:${round.id}:v1` : `result:${round.id}:page:${index + 1}:v1`,
-    chatId: aggregate.poll.chatId, text,
+    chatId: aggregate.poll.chatId, ...message,
     idempotencyKey: index === 0 ? `poll-assistant:result:${aggregate.poll.id}:${round.id}:v1` : `poll-assistant:result:${aggregate.poll.id}:${round.id}:page:${index + 1}:v1`,
     deliveryBatchKey: deliveryId, deliverySequence: index,
     ...(index ? { notBefore: new Date(completedAt.getTime() + index * 2_000).toISOString() } : {})
