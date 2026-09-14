@@ -1,6 +1,6 @@
 {
   "name": "@wabs/plugin-poll-assistant",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "license": "MIT",
   "private": true,

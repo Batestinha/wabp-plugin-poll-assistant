@@ -147,7 +147,7 @@ test('long result pages preserve every Unicode codepoint and blank overrides res
 
 test('the archive retains every SQL migration and all declared translations and controls', () => {
   const metadata = require('../wa-plugin.json');
-  assert.equal(metadata.dataVersion, '7');
+  assert.equal(metadata.dataVersion, '8');
   assert.equal(metadata.databases[0].name, 'polls');
   assert.equal(migrations.length, 7);
   for (const migration of migrations) assert.equal(fs.readFileSync(path.join('migrations/polls', migration), 'utf8'), fs.readFileSync(path.join('src/migrations/polls', migration), 'utf8'));

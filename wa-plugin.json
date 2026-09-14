@@ -4,7 +4,7 @@
   "name": "Poll Assistant",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "kind": "managed_group",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "coreApiRange": "^0.3.6",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
@@ -264,7 +264,7 @@
       "resource": "transport.poll-history"
     }
   ],
-  "dataVersion": "7",
+  "dataVersion": "8",
   "assistant": {
     "summary": "Guided durable WhatsApp polls with operator presets, aggregate results, and confirmed lifecycle management.",
     "summaryKey": "official.poll-assistant.assistant.summary",
@@ -1031,7 +1031,7 @@
             ]
           },
           "templateDefaultFragment": true,
-          "placeholder": "Closing time for «{question}»: {closing}"
+          "placeholder": "Closing time for \u00ab{question}\u00bb: {closing}"
         },
         "dangerous": false,
         "sensitivity": {
@@ -1226,7 +1226,7 @@
             ]
           },
           "templateDefaultFragment": true,
-          "placeholder": "Poll closed: «{question}»\n\n*{outcome}*\n\nResponses: {responseCount} of {eligibleCount} eligible voters ({turnoutPercent}%)\n\n{optionResults}"
+          "placeholder": "Poll closed: \u00ab{question}\u00bb\n\n*{outcome}*\n\nResponses: {responseCount} of {eligibleCount} eligible voters ({turnoutPercent}%)\n\n{optionResults}"
         },
         "dangerous": false,
         "sensitivity": {
@@ -3514,7 +3514,7 @@
             ]
           },
           "templateDefaultFragment": true,
-          "placeholder": "Tie resolved for «{question}»: {options}."
+          "placeholder": "Tie resolved for \u00ab{question}\u00bb: {options}."
         },
         "dangerous": false,
         "sensitivity": {

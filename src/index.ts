@@ -11,7 +11,7 @@ import { registerPollAssistantServices } from './service';
 
 export const pollAssistantPlugin: BotPlugin = {
   manifest: pollAssistantManifest,
-  lifecycle: { onInstall: migratePollTemplates, onUpdate: migratePollTemplates },
+  lifecycle: { onInstall: migratePollTemplates, onUpdate: migratePollTemplates, migrateData: migratePollTemplates },
   registerCommands(context) {
     registerPollAssistantCommands(context);
   },

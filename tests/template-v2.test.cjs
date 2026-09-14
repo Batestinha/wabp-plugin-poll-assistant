@@ -7,6 +7,21 @@ const { resolvePollMessage } = require('../dist/templateDelivery');
 const pt = require('../locales/pt-PT/official.poll-assistant.json');
 const t = (key, params) => (pt[key] ?? key).replace(/\{(\w+)\}/g, (token, name) => String(params?.[name] ?? token));
 
+test('account runtime migration persists templates even when package installation ran in the console account', async () => {
+  const plugin = require('../dist').default;
+  let applied;
+  await plugin.lifecycle.migrateData({ whatsAppAccountId: 'real-account', logger: { info() {} },
+    migrateConfiguration: async (key, transform) => {
+      assert.equal(key, 'message-templates-v2');
+      applied = transform({ scopes: [{ id: 'scope', parentScopeId: null }], layers: [
+        { id: 'instance', scopeId: 'scope', config: { messages: { publication: 'Custom {question}', mentionEligible: false } } }
+      ] });
+      return { changed: applied.length, backupKey: 'real-account-backup' };
+    } });
+  assert.equal(applied.length, 1);
+  assert.deepEqual(applied[0].config.messages, { publication: 'Custom {question}', templateVersion: 2 });
+});
+
 test('ballot delivery compares canonical choices independently of display language', () => {
   const source = '{{#if ballotDelivery == "private"}}Privado{{else}}Grupo{{/if}}';
   assert.equal(pollTemplateFields('publication').find(field => field.token === 'ballotDelivery').valueType, 'enum');
