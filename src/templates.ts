@@ -4,17 +4,20 @@ import { renderValueTemplate, validateValueTemplate, previewTemplateFragment, tr
 
 const contextTokens = ['pollId', 'question', 'timezone', 'cutoffAt'];
 const outcomeTokens = [...contextTokens, 'options', 'certainOptions', 'tiedOptions', 'remainingSeats', 'medianOptions', 'modeOptions', 'total', 'unit'];
+const publicationTokens = [...contextTokens, 'deliveryNotice', 'options', 'purpose', 'rule', 'closing', 'quorum', 'tiePolicy', 'ballotDelivery', 'voterDisclosure', 'activationTimeout', 'postVoteAction'];
 
 /** The editor, validation, localized source catalog and renderer share this contract. */
 export const pollTemplateDefinitions = {
   publication: {
     title: 'Publication',
-    tokens: [...contextTokens, 'deliveryNotice', 'options', 'purpose', 'rule', 'closing', 'quorum', 'tiePolicy', 'ballotDelivery', 'voterDisclosure', 'activationTimeout', 'postVoteAction'],
+    tokens: publicationTokens,
     source: '{deliveryNotice}\n\nQuestion: {question}\nOptions:\n{options}\n\nPurpose: {purpose}\nRule: {rule}\nClosing: {closing}{{#if postVoteAction}}\n\n{postVoteAction}{{/if}}'
   },
   closedPublication: {
     title: 'Closed publication',
-    tokens: [...contextTokens, 'closedAt', 'originalPublication', 'result'],
+    // Operators commonly copy the publication template and change its state
+    // wording. Keep every publication field available, then add close-only data.
+    tokens: [...publicationTokens, 'closedAt', 'originalPublication', 'result'],
     source: 'Poll closed: «{question}»'
   },
   publicationOption: { title: 'Publication option row', tokens: ['ordinal', 'label', 'option'], source: '{ordinal}. {label}' },

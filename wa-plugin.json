@@ -4,7 +4,7 @@
   "name": "Poll Assistant",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "kind": "managed_group",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "coreApiRange": "^0.3.8",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
@@ -912,6 +912,176 @@
               "optional": true
             },
             {
+              "token": "deliveryNotice",
+              "label": "Delivery Notice",
+              "sampleValue": "poll published in this group.",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "purpose",
+              "label": "Purpose",
+              "sampleValue": "Decision",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "decide",
+                  "label": "Decision"
+                },
+                {
+                  "value": "measure",
+                  "label": "Measurement"
+                },
+                {
+                  "value": "count",
+                  "label": "Count"
+                }
+              ],
+              "conditionSampleValue": "decide"
+            },
+            {
+              "token": "rule",
+              "label": "Rule",
+              "sampleValue": "Most votes",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "plurality",
+                  "label": "Most votes"
+                },
+                {
+                  "value": "approval",
+                  "label": "Approval"
+                },
+                {
+                  "value": "single_non_transferable",
+                  "label": "Single non-transferable vote"
+                },
+                {
+                  "value": "multiwinner_approval",
+                  "label": "Multiple winners by approval"
+                },
+                {
+                  "value": "approve_reject",
+                  "label": "Approve or reject"
+                },
+                {
+                  "value": "distribution",
+                  "label": "Distribution"
+                },
+                {
+                  "value": "ordered_scale",
+                  "label": "Ordered scale"
+                },
+                {
+                  "value": "sum",
+                  "label": "Sum"
+                }
+              ],
+              "conditionSampleValue": "plurality"
+            },
+            {
+              "token": "closing",
+              "label": "Closing",
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "quorum",
+              "label": "Quorum",
+              "sampleValue": "50%",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "tiePolicy",
+              "label": "Tie Policy",
+              "sampleValue": "Authorized choice",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "no_decision",
+                  "label": "No decision"
+                },
+                {
+                  "value": "authorized_choice",
+                  "label": "Authorized choice"
+                },
+                {
+                  "value": "status_quo",
+                  "label": "Status quo"
+                },
+                {
+                  "value": "random_draw",
+                  "label": "Random draw"
+                }
+              ],
+              "conditionSampleValue": "no_decision"
+            },
+            {
+              "token": "ballotDelivery",
+              "label": "Ballot Delivery",
+              "sampleValue": "Group",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "private",
+                  "label": "Private"
+                },
+                {
+                  "value": "group",
+                  "label": "Group"
+                }
+              ],
+              "conditionSampleValue": "private"
+            },
+            {
+              "token": "voterDisclosure",
+              "label": "Voter Disclosure",
+              "sampleValue": "Named",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "named",
+                  "label": "Named"
+                },
+                {
+                  "value": "hidden",
+                  "label": "Hidden"
+                }
+              ],
+              "conditionSampleValue": "named"
+            },
+            {
+              "token": "activationTimeout",
+              "label": "Activation Timeout",
+              "sampleValue": "120 minutes",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 120,
+              "unit": "minutes"
+            },
+            {
+              "token": "postVoteAction",
+              "label": "Post Vote Action",
+              "sampleValue": "The selected option updates the event.",
+              "valueType": "text",
+              "optional": true
+            },
+            {
               "token": "closedAt",
               "label": "Closed At",
               "sampleValue": "12:22:57",
@@ -959,6 +1129,176 @@
               "token": "cutoffAt",
               "label": "Cutoff At",
               "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "deliveryNotice",
+              "label": "Delivery Notice",
+              "sampleValue": "poll published in this group.",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "purpose",
+              "label": "Purpose",
+              "sampleValue": "Decision",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "decide",
+                  "label": "Decision"
+                },
+                {
+                  "value": "measure",
+                  "label": "Measurement"
+                },
+                {
+                  "value": "count",
+                  "label": "Count"
+                }
+              ],
+              "conditionSampleValue": "decide"
+            },
+            {
+              "token": "rule",
+              "label": "Rule",
+              "sampleValue": "Most votes",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "plurality",
+                  "label": "Most votes"
+                },
+                {
+                  "value": "approval",
+                  "label": "Approval"
+                },
+                {
+                  "value": "single_non_transferable",
+                  "label": "Single non-transferable vote"
+                },
+                {
+                  "value": "multiwinner_approval",
+                  "label": "Multiple winners by approval"
+                },
+                {
+                  "value": "approve_reject",
+                  "label": "Approve or reject"
+                },
+                {
+                  "value": "distribution",
+                  "label": "Distribution"
+                },
+                {
+                  "value": "ordered_scale",
+                  "label": "Ordered scale"
+                },
+                {
+                  "value": "sum",
+                  "label": "Sum"
+                }
+              ],
+              "conditionSampleValue": "plurality"
+            },
+            {
+              "token": "closing",
+              "label": "Closing",
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "quorum",
+              "label": "Quorum",
+              "sampleValue": "50%",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "tiePolicy",
+              "label": "Tie Policy",
+              "sampleValue": "Authorized choice",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "no_decision",
+                  "label": "No decision"
+                },
+                {
+                  "value": "authorized_choice",
+                  "label": "Authorized choice"
+                },
+                {
+                  "value": "status_quo",
+                  "label": "Status quo"
+                },
+                {
+                  "value": "random_draw",
+                  "label": "Random draw"
+                }
+              ],
+              "conditionSampleValue": "no_decision"
+            },
+            {
+              "token": "ballotDelivery",
+              "label": "Ballot Delivery",
+              "sampleValue": "Group",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "private",
+                  "label": "Private"
+                },
+                {
+                  "value": "group",
+                  "label": "Group"
+                }
+              ],
+              "conditionSampleValue": "private"
+            },
+            {
+              "token": "voterDisclosure",
+              "label": "Voter Disclosure",
+              "sampleValue": "Named",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "named",
+                  "label": "Named"
+                },
+                {
+                  "value": "hidden",
+                  "label": "Hidden"
+                }
+              ],
+              "conditionSampleValue": "named"
+            },
+            {
+              "token": "activationTimeout",
+              "label": "Activation Timeout",
+              "sampleValue": "120 minutes",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 120,
+              "unit": "minutes"
+            },
+            {
+              "token": "postVoteAction",
+              "label": "Post Vote Action",
+              "sampleValue": "The selected option updates the event.",
               "valueType": "text",
               "optional": true
             },

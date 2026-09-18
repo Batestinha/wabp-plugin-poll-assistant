@@ -188,7 +188,10 @@ test('pins open polls, unpins on close, edits the existing publication once and 
     'poll-announcement:fixture-round:published', 'fixture-poll', 'fixture-round', 'announcement', 'announcement-key',
     'fixture@g.us', 'Original publication', 'announcement-send-key', 'sent', 'publication-message', timestamp, timestamp, timestamp);
   const calls = [];
-  const settings = { pinActivePolls: true, editPublicationOnClose: true, messages: { closedPublication: 'Closed: {question}', templateVersion: 2 } };
+  const settings = { pinActivePolls: true, editPublicationOnClose: true, messages: {
+    closedPublication: '{{#if ballotDelivery == "group"}}Encerrada: {question}{{else}}Encerrada em privado: {question}{{/if}}\nFinalidade: {purpose}\nPrazo: {closing}',
+    templateVersion: 2
+  } };
   const ctx = { databases: { open: () => db }, configFor: async () => settings,
     i18n: { translatorForScope: async () => t, resolveScopeLocale: async () => ({ locale: 'pt-PT' }) },
     pinMessage: async (...args) => calls.push(['pin', ...args]), unpinMessage: async (...args) => calls.push(['unpin', ...args]),
@@ -200,7 +203,8 @@ test('pins open polls, unpins on close, edits the existing publication once and 
     db.run("UPDATE polls SET status = 'resolved'");
     await reconcilePollMessages(ctx, new Date('2026-09-12T10:02:00.000Z'));
     assert.equal(calls[1][0], 'unpin'); assert.equal(calls[1][1], 'native-poll');
-    assert.equal(calls[2][0], 'edit'); assert.equal(calls[2][1], 'publication-message'); assert.equal(calls[2][2], 'Closed: Manhã ou tarde?');
+    assert.equal(calls[2][0], 'edit'); assert.equal(calls[2][1], 'publication-message');
+    assert.match(calls[2][2], /^Encerrada: Manhã ou tarde\?\nFinalidade: Decidir\nPrazo: /);
     await reconcilePollMessages(ctx, new Date('2026-09-12T10:04:00.000Z'));
     assert.equal(calls.length, 3);
   } finally { db.close(); }

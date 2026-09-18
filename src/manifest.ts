@@ -37,7 +37,7 @@ import {
 export const pollAssistantManifest: PluginManifest = {
   pluginId: POLL_ASSISTANT_PLUGIN_ID,
   kind: 'managed_group',
-  version: '0.7.0',
+  version: '0.7.1',
   coreApiRange: '^0.3.8',
   messageNamespace: 'official.poll-assistant',
   descriptionKey: 'official.poll-assistant.description',

@@ -146,12 +146,29 @@ function renderPublicationAnnouncement(
   distributing: boolean,
   postVoteAction: string | undefined
 ): TemplateFragment {
+  return renderPollTemplateFragment({
+    kind: 'publication',
+    overrides: config.messages,
+    t,
+    ...pollPublicationTemplateValues(snapshot, config, locale, t, distributing, postVoteAction)
+  });
+}
+
+/** Shared display and canonical values for publication-derived templates. */
+export function pollPublicationTemplateValues(
+  snapshot: StoredPollRoundSnapshot,
+  config: PollAssistantConfig,
+  locale: string,
+  t: TranslateFn,
+  distributing: boolean,
+  postVoteAction: string | undefined
+) {
   const timezone = config.timezone;
   const definition = snapshot.poll.definition;
   const tiePolicy = definition.purpose === 'decide'
     ? t(`official.poll-assistant.flow.tiePolicy.${tiePolicyKey(definition.tiePolicy.kind)}`)
     : t('official.poll-assistant.flow.summary.tie.none');
-  return renderPollTemplateFragment({ kind: 'publication', overrides: config.messages, t, conditionValues: {
+  return { conditionValues: {
     ballotDelivery: definition.ballotDelivery, voterDisclosure: definition.voterDisclosure, purpose: definition.purpose,
     rule: definition.rule.kind, tiePolicy: definition.purpose === 'decide' ? definition.tiePolicy.kind : undefined,
     activationTimeout: definition.closing.kind === 'deadline' && definition.closing.deadline.mode === 'after_first_non_creator_response' ? definition.closing.deadline.activationTimeoutMinutes : undefined
@@ -173,7 +190,7 @@ function renderPublicationAnnouncement(
     ballotDelivery: t(`official.poll-assistant.flow.ballotDelivery.${definition.ballotDelivery}`),
     voterDisclosure: t(`official.poll-assistant.flow.voterDisclosure.${definition.voterDisclosure}`),
     pollId: definition.id
-  } });
+  } };
 }
 
 function closingLabel(

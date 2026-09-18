@@ -34,6 +34,19 @@ test('ballot delivery compares canonical choices independently of display langua
   assert.ok(pollTemplateIssues('publication', '{{#if ballotDelivery > 1}}x{{/if}}').length);
 });
 
+test('closed publication accepts publication fields and canonical conditions', () => {
+  const source = '❌ ENCERRADA ❌\n{{#if ballotDelivery == "group"}}Sondagem “{question}”{{else}}Sondagem privada “{question}”{{/if}}\nFinalidade: {purpose}\nPrazo: Até às {closing}';
+  const fields = pollTemplateFields('closedPublication');
+  assert.equal(fields.find(field => field.token === 'ballotDelivery').valueType, 'enum');
+  assert.ok(fields.some(field => field.token === 'purpose'));
+  assert.ok(fields.some(field => field.token === 'closing'));
+  assert.deepEqual(pollTemplateIssues('closedPublication', source), []);
+  const fragment = renderPollTemplateFragment({ kind: 'closedPublication', overrides: { closedPublication: source }, t,
+    values: { question: 'Manhã ou tarde?', ballotDelivery: 'Grupo', purpose: 'Decisão', closing: '12:22' },
+    conditionValues: { ballotDelivery: 'group', purpose: 'decide' } });
+  assert.equal(previewTemplateFragment(fragment), '❌ ENCERRADA ❌\nSondagem “Manhã ou tarde?”\nFinalidade: Decisão\nPrazo: Até às 12:22');
+});
+
 test('hidden nested rows cannot resolve or notify a recipient', async () => {
   const row = renderPollTemplateFragment({ kind: 'resultOption', t, overrides: { resultOption: '{{#if count > 0}}{{mention target "eligibleVoters"}}{{else}}No votes{{/if}}' }, values: { count: 0 } });
   const fragment = renderPollTemplateFragment({ kind: 'result', t, overrides: { result: '{optionResults}' }, values: { optionResults: row } });

@@ -3,6 +3,8 @@ import { parsePollAssistantConfig } from './config';
 import { getPollDelivery, getPollLifecycleByRoundId, pollsDatabase } from './store';
 import { renderPollTemplateFragment } from './templates';
 import { resolvePollMessage } from './templateDelivery';
+import { pollPublicationTemplateValues } from './announcements';
+import { getPollOutcomeConfiguration } from './outcomeStore';
 
 const EDIT_WINDOW_MS = 15 * 60_000;
 const PIN_SECONDS = 30 * 24 * 60 * 60;
@@ -60,10 +62,17 @@ export async function reconcilePollMessages(context: PluginRuntimeContext, now =
           const t = await context.i18n.translatorForScope(snapshot.poll.scopeId);
           const locale = (await context.i18n.resolveScopeLocale(snapshot.poll.scopeId)).locale;
           const closedAt = snapshot.round.closesAt ?? snapshot.round.finalizedAt ?? snapshot.poll.cancelledAt ?? now.toISOString();
+          const outcome = getPollOutcomeConfiguration(db, snapshot.poll.id);
+          const publicationValues = pollPublicationTemplateValues(snapshot, config, locale, t, false,
+            outcome ? t('official.poll-assistant.outcome.published', {
+              summary: outcome.summary,
+              policy: t(`official.poll-assistant.outcome.policy.${outcome.policy}`)
+            }) : undefined);
           const pages = await resolvePollMessage(context, snapshot.poll, renderPollTemplateFragment({
-            kind: 'closedPublication', overrides: config.messages, t, values: {
-              pollId: snapshot.poll.id, question: snapshot.poll.definition.question, timezone: config.timezone,
-              cutoffAt: snapshot.round.closesAt,
+            kind: 'closedPublication', overrides: config.messages, t,
+            conditionValues: publicationValues.conditionValues,
+            values: {
+              ...publicationValues.values,
               closedAt: new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short', timeZone: config.timezone }).format(new Date(closedAt)),
               originalPublication: publication.text,
               result: getPollDelivery(db, `poll-result:${id}`)?.text
