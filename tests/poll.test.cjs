@@ -147,9 +147,9 @@ test('long result pages preserve every Unicode codepoint and blank overrides res
 
 test('the archive retains every SQL migration and all declared translations and controls', () => {
   const metadata = require('../wa-plugin.json');
-  assert.equal(metadata.dataVersion, '8');
+  assert.equal(metadata.dataVersion, '9');
   assert.equal(metadata.databases[0].name, 'polls');
-  assert.equal(migrations.length, 7);
+  assert.equal(migrations.length, 8);
   for (const migration of migrations) assert.equal(fs.readFileSync(path.join('migrations/polls', migration), 'utf8'), fs.readFileSync(path.join('src/migrations/polls', migration), 'utf8'));
   for (const key of Object.keys(plugin.manifest.defaultMessages)) assert.ok(pt[key]?.trim(), key);
   assert.equal(typeof plugin.lifecycle.onUpdate, 'function');
@@ -177,4 +177,53 @@ test('publication pages are atomic and retries keep their original text and page
     assert.deepEqual(getPollDelivery(db, 'page-2').groupMentions, inputs[1].delivery.groupMentions);
     assert.equal(getPollDelivery(db, 'poll-announcement:fixture-round:published').mentionAll, true);
   } finally { db.close(); fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('pins open polls, unpins on close, edits the existing publication once and retains state across sweeps', async () => {
+  const { reconcilePollMessages } = require('../dist/messageLifecycle');
+  const db = open(':memory:'); migrate(db, migrations); seed(db);
+  db.run("UPDATE poll_rounds SET status = 'open', published_at = ?, poll_wa_message_id = 'native-poll'", timestamp);
+  db.run(`INSERT INTO poll_deliveries (id, poll_id, round_id, kind, delivery_key, chat_id, text,
+    idempotency_key, status, message_id, sent_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    'poll-announcement:fixture-round:published', 'fixture-poll', 'fixture-round', 'announcement', 'announcement-key',
+    'fixture@g.us', 'Original publication', 'announcement-send-key', 'sent', 'publication-message', timestamp, timestamp, timestamp);
+  const calls = [];
+  const settings = { pinActivePolls: true, editPublicationOnClose: true, messages: { closedPublication: 'Closed: {question}', templateVersion: 2 } };
+  const ctx = { databases: { open: () => db }, configFor: async () => settings,
+    i18n: { translatorForScope: async () => t, resolveScopeLocale: async () => ({ locale: 'pt-PT' }) },
+    pinMessage: async (...args) => calls.push(['pin', ...args]), unpinMessage: async (...args) => calls.push(['unpin', ...args]),
+    editMessage: async (...args) => calls.push(['edit', ...args]), logger: { warn() {} }, audit: { record: async () => {} } };
+  try {
+    await reconcilePollMessages(ctx, new Date(timestamp));
+    assert.deepEqual(calls, [['pin', 'native-poll', 2592000]]);
+    db.run("UPDATE poll_rounds SET status = 'finalized', finalized_at = ?, closes_at = ?", '2026-09-12T10:02:00.000Z', '2026-09-12T10:02:00.000Z');
+    db.run("UPDATE polls SET status = 'resolved'");
+    await reconcilePollMessages(ctx, new Date('2026-09-12T10:02:00.000Z'));
+    assert.equal(calls[1][0], 'unpin'); assert.equal(calls[1][1], 'native-poll');
+    assert.equal(calls[2][0], 'edit'); assert.equal(calls[2][1], 'publication-message'); assert.equal(calls[2][2], 'Closed: Manhã ou tarde?');
+    await reconcilePollMessages(ctx, new Date('2026-09-12T10:04:00.000Z'));
+    assert.equal(calls.length, 3);
+  } finally { db.close(); }
+});
+
+test('disabled pinning cleans up managed pins and expired edits never send replacement messages', async () => {
+  const { reconcilePollMessages } = require('../dist/messageLifecycle');
+  const db = open(':memory:'); migrate(db, migrations); seed(db);
+  db.run("UPDATE poll_rounds SET status = 'open', published_at = ?, poll_wa_message_id = 'native-poll'", timestamp);
+  const calls = []; const audits = []; let enabled = true;
+  const ctx = { databases: { open: () => db }, configFor: async () => ({ pinActivePolls: enabled, editPublicationOnClose: true }),
+    pinMessage: async (...args) => calls.push(['pin', ...args]), unpinMessage: async (...args) => calls.push(['unpin', ...args]),
+    editMessage: async () => { throw new Error('expired publication must not be edited'); },
+    logger: { warn() {} }, audit: { record: async value => audits.push(value) } };
+  try {
+    await reconcilePollMessages(ctx, new Date(timestamp)); enabled = false;
+    await reconcilePollMessages(ctx, new Date('2026-09-12T10:02:00.000Z'));
+    assert.deepEqual(calls.map(call => call[0]), ['pin', 'unpin']);
+    db.run(`INSERT INTO poll_deliveries (id, poll_id, round_id, kind, delivery_key, chat_id, text, idempotency_key, status, message_id, sent_at, created_at, updated_at)
+      VALUES ('poll-announcement:fixture-round:published', 'fixture-poll', 'fixture-round', 'announcement', 'key', 'fixture@g.us', 'Original', 'send', 'sent', 'message', ?, ?, ?)`, timestamp, timestamp, timestamp);
+    db.run("UPDATE poll_rounds SET status = 'finalized'"); db.run("UPDATE polls SET status = 'resolved'");
+    await reconcilePollMessages(ctx, new Date('2026-09-12T11:30:00.000Z'));
+    assert.equal(audits.at(-1).action, 'poll.publication.edit.unavailable');
+    assert.equal(db.get('SELECT closed_edit_done FROM poll_message_lifecycle').closed_edit_done, 1);
+  } finally { db.close(); }
 });

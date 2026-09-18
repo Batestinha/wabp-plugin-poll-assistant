@@ -125,6 +125,8 @@ const ianaTimezoneSchema = z.string().trim().min(1).refine((value) => {
 }, 'Must be a valid IANA timezone');
 
 const pollAssistantConfigObjectSchema = z.object({
+  pinActivePolls: z.boolean().default(false),
+  editPublicationOnClose: z.boolean().default(false),
   messages: pollMessageSettingsSchema,
   allowCreation: z.boolean().default(true),
   allowMemberCreation: z.boolean().default(true),

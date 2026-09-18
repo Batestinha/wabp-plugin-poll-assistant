@@ -4,8 +4,8 @@
   "name": "Poll Assistant",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "kind": "managed_group",
-  "version": "0.6.1",
-  "coreApiRange": "^0.3.6",
+  "version": "0.7.0",
+  "coreApiRange": "^0.3.8",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
   "descriptionKey": "official.poll-assistant.description",
@@ -264,7 +264,7 @@
       "resource": "transport.poll-history"
     }
   ],
-  "dataVersion": "8",
+  "dataVersion": "9",
   "assistant": {
     "summary": "Guided durable WhatsApp polls with operator presets, aggregate results, and confirmed lifecycle management.",
     "summaryKey": "official.poll-assistant.assistant.summary",
@@ -334,9 +334,76 @@
       "automationWorkingHours.enabled",
       "automationWorkingHours.windows",
       "creationPresets",
-      "messages.templateVersion"
+      "messages.templateVersion",
+      "pinActivePolls",
+      "editPublicationOnClose",
+      "messages.closedPublication"
     ],
     "controls": [
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "pinActivePolls",
+        "id": "plugin.official.poll-assistant.pinActivePolls",
+        "label": "Pin active polls",
+        "description": "Pin group polls while voting is open and unpin them when voting closes. Private ballots use the group publication. Turning this off also removes pins managed by this plugin.",
+        "section": "Poll Assistant",
+        "order": 45,
+        "schema": {
+          "type": "boolean"
+        },
+        "ui": {
+          "helpText": "Pin group polls while voting is open and unpin them when voting closes. Private ballots use the group publication. Turning this off also removes pins managed by this plugin.",
+          "widget": "toggle"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "editPublicationOnClose",
+        "id": "plugin.official.poll-assistant.editPublicationOnClose",
+        "label": "Edit publication when the poll closes",
+        "description": "Replace the original publication text using the template below. WhatsApp only permits edits within 15 minutes of sending; older publications stay unchanged and results are still sent normally.",
+        "section": "After closing",
+        "order": 490,
+        "schema": {
+          "type": "boolean"
+        },
+        "ui": {
+          "helpText": "Replace the original publication text using the template below. WhatsApp only permits edits within 15 minutes of sending; older publications stay unchanged and results are still sent normally.",
+          "widget": "toggle"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
       {
         "pluginId": "official.poll-assistant",
         "path": "messages.publication",
@@ -798,6 +865,167 @@
       },
       {
         "pluginId": "official.poll-assistant",
+        "path": "messages.closedPublication",
+        "id": "plugin.official.poll-assistant.messages.closedPublication",
+        "label": "Closed publication",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "After closing",
+        "order": 501,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-values-v2",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "closedAt",
+              "label": "Closed At",
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "originalPublication",
+              "label": "Original Publication",
+              "sampleValue": "Question: Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "result",
+              "label": "Result",
+              "sampleValue": "Selected: Afternoon",
+              "valueType": "text",
+              "optional": true
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "pollId",
+              "label": "Poll Id",
+              "sampleValue": "poll-example",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "timezone",
+              "label": "Timezone",
+              "sampleValue": "Europe/Lisbon",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "cutoffAt",
+              "label": "Cutoff At",
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "closedAt",
+              "label": "Closed At",
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "originalPublication",
+              "label": "Original Publication",
+              "sampleValue": "Question: Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "result",
+              "label": "Result",
+              "sampleValue": "Selected: Afternoon",
+              "valueType": "text",
+              "optional": true
+            }
+          ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
+          "placeholder": "Poll closed: «{question}»"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
         "path": "messages.publicationOption",
         "id": "plugin.official.poll-assistant.messages.publicationOption",
         "label": "Publication option row",
@@ -1031,7 +1259,7 @@
             ]
           },
           "templateDefaultFragment": true,
-          "placeholder": "Closing time for \u00ab{question}\u00bb: {closing}"
+          "placeholder": "Closing time for «{question}»: {closing}"
         },
         "dangerous": false,
         "sensitivity": {
@@ -1226,7 +1454,7 @@
             ]
           },
           "templateDefaultFragment": true,
-          "placeholder": "Poll closed: \u00ab{question}\u00bb\n\n*{outcome}*\n\nResponses: {responseCount} of {eligibleCount} eligible voters ({turnoutPercent}%)\n\n{optionResults}"
+          "placeholder": "Poll closed: «{question}»\n\n*{outcome}*\n\nResponses: {responseCount} of {eligibleCount} eligible voters ({turnoutPercent}%)\n\n{optionResults}"
         },
         "dangerous": false,
         "sensitivity": {
@@ -3514,7 +3742,7 @@
             ]
           },
           "templateDefaultFragment": true,
-          "placeholder": "Tie resolved for \u00ab{question}\u00bb: {options}."
+          "placeholder": "Tie resolved for «{question}»: {options}."
         },
         "dangerous": false,
         "sensitivity": {

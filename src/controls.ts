@@ -62,6 +62,8 @@ const QUORUM_MODE_OPTIONS = [
 ];
 
 export const pollAssistantControls: ControlDescriptor[] = [
+  control('pinActivePolls', 'Pin active polls', 'Pin group polls while voting is open and unpin them when voting closes. Private ballots use the group publication. Turning this off also removes pins managed by this plugin.', 45, { type: 'boolean' }, { widget: 'toggle' }),
+  control('editPublicationOnClose', 'Edit publication when the poll closes', 'Replace the original publication text using the template below. WhatsApp only permits edits within 15 minutes of sending; older publications stay unchanged and results are still sent normally.', 490, { type: 'boolean' }, { widget: 'toggle' }, 'After closing'),
   ...Object.entries(pollTemplateDefinitions).map(([kind, definition], index) => control(
     `messages.${kind}`, definition.title,
     'Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.',
@@ -76,7 +78,7 @@ export const pollAssistantControls: ControlDescriptor[] = [
       templateDefaultFragment: true,
       placeholder: definition.source
     },
-    'Messages'
+    kind === 'closedPublication' ? 'After closing' : 'Messages'
   )),
   control('messages.activationEnabled', 'Announce activation', 'Send a separate closing-time announcement after activation. New announcements are disabled by default.', 520, { type: 'boolean' }, { widget: 'toggle' }, 'Messages'),
   control(

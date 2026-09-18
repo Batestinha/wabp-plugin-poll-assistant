@@ -37,8 +37,8 @@ import {
 export const pollAssistantManifest: PluginManifest = {
   pluginId: POLL_ASSISTANT_PLUGIN_ID,
   kind: 'managed_group',
-  version: '0.6.1',
-  coreApiRange: '^0.3.6',
+  version: '0.7.0',
+  coreApiRange: '^0.3.8',
   messageNamespace: 'official.poll-assistant',
   descriptionKey: 'official.poll-assistant.description',
   defaultMessages: pollAssistantMessages,
@@ -199,7 +199,7 @@ export const pollAssistantManifest: PluginManifest = {
   ],
   databases: [...pollAssistantDatabases],
   ownedData: [{ resource: POLL_HISTORY_OWNED_DATA_RESOURCE }],
-  dataVersion: '8',
+  dataVersion: '9',
   workflowActions: [pollCreateAction],
   assistant: {
     summary: pollAssistantMessages['official.poll-assistant.assistant.summary']!,

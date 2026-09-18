@@ -12,6 +12,11 @@ export const pollTemplateDefinitions = {
     tokens: [...contextTokens, 'deliveryNotice', 'options', 'purpose', 'rule', 'closing', 'quorum', 'tiePolicy', 'ballotDelivery', 'voterDisclosure', 'activationTimeout', 'postVoteAction'],
     source: '{deliveryNotice}\n\nQuestion: {question}\nOptions:\n{options}\n\nPurpose: {purpose}\nRule: {rule}\nClosing: {closing}{{#if postVoteAction}}\n\n{postVoteAction}{{/if}}'
   },
+  closedPublication: {
+    title: 'Closed publication',
+    tokens: [...contextTokens, 'closedAt', 'originalPublication', 'result'],
+    source: 'Poll closed: «{question}»'
+  },
   publicationOption: { title: 'Publication option row', tokens: ['ordinal', 'label', 'option'], source: '{ordinal}. {label}' },
   activation: { title: 'Activation notice', tokens: [...contextTokens, 'closing', 'closesAt'], source: 'Closing time for «{question}»: {closing}' },
   result: {
@@ -41,7 +46,7 @@ export const POLL_TEMPLATE_MAX_LENGTH = 14_000;
 
 /** @operatorConsoleSamples Example values for token buttons and preview only. */
 export const pollTemplateSamples: Record<string, string> = {
-  pollId: 'poll-example', question: 'Morning or afternoon?', timezone: 'Europe/Lisbon', cutoffAt: '12:22:57',
+  pollId: 'poll-example', question: 'Morning or afternoon?', timezone: 'Europe/Lisbon', cutoffAt: '12:22:57', closedAt: '12:22:57', originalPublication: 'Question: Morning or afternoon?', result: 'Selected: Afternoon',
   deliveryNotice: 'poll published in this group.', options: 'Afternoon', purpose: 'Decision', rule: 'Most votes',
   closing: '12:22:57', closesAt: '12:22:57', quorum: '50%', tiePolicy: 'Authorized choice', ballotDelivery: 'Group',
   voterDisclosure: 'Named', activationTimeout: '120 minutes', postVoteAction: 'The selected option updates the event.',

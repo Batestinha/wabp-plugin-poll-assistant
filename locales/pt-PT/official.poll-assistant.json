@@ -265,5 +265,6 @@
   "official.poll-assistant.announcement.delivery.private": "votação por mensagem privada.",
   "official.poll-assistant.announcement.delivery.privateUnderway": "envio dos boletins por mensagem privada ainda em curso.",
   "official.poll-assistant.announcement.delivery.actor": "A tua sondagem privada.",
-  "official.poll-assistant.announcement.closing.afterFirstResponse": "{minutes} minutos após a primeira resposta de outro eleitor"
+  "official.poll-assistant.announcement.closing.afterFirstResponse": "{minutes} minutos após a primeira resposta de outro eleitor",
+  "official.poll-assistant.template.closedPublication": "Sondagem encerrada: «{question}»"
 }

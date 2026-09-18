@@ -29,3 +29,11 @@ Publication notification settings migrate once to an Eligible voters mention chi
 preserving effective scope/identity overrides and custom prose. The host backs up
 all original layers in the same transaction. `{{default}}` preserves the localized
 default message; the old decorative `@all —` delivery notice prefix is removed.
+
+Poll message lifecycle settings are available in Poll Assistant settings. `Pin active
+polls` pins the native group ballot (or the publication for private ballots) and
+removes the managed pin on closure or when disabled. The `After closing` section
+optionally edits the original publication with the existing variable, condition,
+and mention editor. WhatsApp's 15-minute editing window still applies; an expired
+or rejected edit is audited and never interrupts poll results. Both options are
+disabled by default, and their durable recovery state survives runtime restarts.
