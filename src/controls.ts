@@ -83,7 +83,7 @@ const TEMPLATE_DESCRIPTIONS: Record<PollTemplateKind, string> = {
 
 export const pollAssistantControls: ControlDescriptor[] = [
   control('pinActivePolls', 'Pin active polls', 'Pin group polls while voting is open and unpin them when voting closes. Private ballots use the group publication. Turning this off also removes pins managed by this plugin.', 330, { type: 'boolean' }, { widget: 'toggle' }, 'Publishing and voting'),
-  control('editPublicationOnClose', 'Edit publication when the poll closes', 'Replace the original publication text using the template below. WhatsApp only permits edits within 15 minutes of sending; older publications stay unchanged and results are still sent normally.', 405, { type: 'boolean' }, { widget: 'toggle' }, 'Closing and results'),
+  control('editPublicationOnClose', 'Edit publication when the poll closes', 'Replace the original publication text using the template below. WhatsApp only permits edits within 15 minutes of sending; older publications stay unchanged and results are still sent normally.', 405, { type: 'boolean' }, { widget: 'toggle' }, 'Closing'),
   ...Object.entries(pollTemplateDefinitions).map(([kind, definition], index) => control(
     `messages.${kind}`, definition.title,
     TEMPLATE_DESCRIPTIONS[kind as PollTemplateKind],

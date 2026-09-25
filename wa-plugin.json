@@ -4,7 +4,7 @@
   "name": "Poll Assistant",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "kind": "managed_group",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "coreApiRange": "^0.3.10",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
@@ -380,7 +380,7 @@
         "id": "plugin.official.poll-assistant.editPublicationOnClose",
         "label": "Edit publication when the poll closes",
         "description": "Replace the original publication text using the template below. WhatsApp only permits edits within 15 minutes of sending; older publications stay unchanged and results are still sent normally.",
-        "section": "Closing and results",
+        "section": "Closing",
         "order": 405,
         "schema": {
           "type": "boolean"
