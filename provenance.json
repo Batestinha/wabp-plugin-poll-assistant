@@ -6,11 +6,11 @@
   "sourceTreeSha": "5b34c8a7e805e76382effab0c0074a599690b466",
   "extractedHistoryCommit": "da920beaf089d8e501f682b4bda6d9660ad6e060",
   "sdk": {
-    "version": "0.3.20",
-    "path": "vendor/wabs-plugin-sdk-0.3.20.tgz",
-    "sha256": "c58cdae0ba497a2cf45bd5025731cb4288ea4311c451f54f9a5d7e307d836f00",
+    "version": "0.3.21",
+    "path": "vendor/wabs-plugin-sdk-0.3.21.tgz",
+    "sha256": "63deb1f2f2104f958e3cc41ce49d3c012fb88ca16055be241af8e2098446c434",
     "sourceDirectory": "packages/plugin-sdk",
-    "sourceCommit": "d5ab41fcaf53822801881622c8d47b1b2d9eaf36"
+    "sourceCommit": "01d8ba6c5c7a36c081317af0b1b8d4d88a0c9b9c"
   },
   "vendoredContracts": "contracts/provenance.json"
 }

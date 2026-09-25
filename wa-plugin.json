@@ -4,7 +4,7 @@
   "name": "Poll Assistant",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "kind": "managed_group",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "coreApiRange": "^0.3.10",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
@@ -304,6 +304,8 @@
     "configPaths": [
       "messages.publication",
       "messages.publicationOption",
+      "messages.proposalOption",
+      "messages.assistantProposal",
       "messages.activation",
       "messages.result",
       "messages.resultOption",
@@ -1371,7 +1373,7 @@
         "label": "Publication option row",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
         "section": "Messages",
-        "order": 501,
+        "order": 502,
         "schema": {
           "type": "string",
           "max": 14000
@@ -1473,12 +1475,464 @@
       },
       {
         "pluginId": "official.poll-assistant",
+        "path": "messages.proposalOption",
+        "id": "plugin.official.poll-assistant.messages.proposalOption",
+        "label": "Assistant proposal option row",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 503,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-values-v2",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "ordinal",
+              "label": "Ordinal",
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
+            },
+            {
+              "token": "label",
+              "label": "Label",
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "numericValue",
+              "label": "Numeric Value",
+              "sampleValue": "1",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "option",
+              "label": "Option",
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "ordinal",
+              "label": "Ordinal",
+              "sampleValue": "1",
+              "valueType": "number",
+              "optional": true,
+              "conditionSampleValue": 1
+            },
+            {
+              "token": "label",
+              "label": "Label",
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "numericValue",
+              "label": "Numeric Value",
+              "sampleValue": "1",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "option",
+              "label": "Option",
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
+            }
+          ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
+          "placeholder": "{ordinal}) - {option}"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
+        "path": "messages.assistantProposal",
+        "id": "plugin.official.poll-assistant.messages.assistantProposal",
+        "label": "Assistant proposal summary",
+        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "section": "Messages",
+        "order": 504,
+        "schema": {
+          "type": "string",
+          "max": 14000
+        },
+        "ui": {
+          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "widget": "text",
+          "multiline": true,
+          "templateDialect": "conditional-values-v2",
+          "templateActivation": "always",
+          "templateEmptyResult": "reject",
+          "templateVariables": [
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "purpose",
+              "label": "Purpose",
+              "sampleValue": "Decision",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "decide",
+                  "label": "Decision"
+                },
+                {
+                  "value": "measure",
+                  "label": "Measurement"
+                },
+                {
+                  "value": "count",
+                  "label": "Count"
+                }
+              ],
+              "conditionSampleValue": "decide"
+            },
+            {
+              "token": "rule",
+              "label": "Rule",
+              "sampleValue": "Most votes",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "plurality",
+                  "label": "Most votes"
+                },
+                {
+                  "value": "approval",
+                  "label": "Approval"
+                },
+                {
+                  "value": "single_non_transferable",
+                  "label": "Single non-transferable vote"
+                },
+                {
+                  "value": "multiwinner_approval",
+                  "label": "Multiple winners by approval"
+                },
+                {
+                  "value": "approve_reject",
+                  "label": "Approve or reject"
+                },
+                {
+                  "value": "distribution",
+                  "label": "Distribution"
+                },
+                {
+                  "value": "ordered_scale",
+                  "label": "Ordered scale"
+                },
+                {
+                  "value": "sum",
+                  "label": "Sum"
+                }
+              ],
+              "conditionSampleValue": "plurality"
+            },
+            {
+              "token": "closing",
+              "label": "Closing",
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "quorum",
+              "label": "Quorum",
+              "sampleValue": "50%",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "tie",
+              "label": "Tie",
+              "sampleValue": "",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "electorate",
+              "label": "Electorate",
+              "sampleValue": "",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "delivery",
+              "label": "Delivery",
+              "sampleValue": "",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "disclosure",
+              "label": "Disclosure",
+              "sampleValue": "",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "consequences",
+              "label": "Consequences",
+              "sampleValue": "Update the event.",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "policy",
+              "label": "Policy",
+              "sampleValue": "After requester confirmation",
+              "valueType": "text",
+              "optional": true
+            }
+          ],
+          "templateConditionVariables": [
+            {
+              "token": "question",
+              "label": "Question",
+              "sampleValue": "Morning or afternoon?",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "options",
+              "label": "Options",
+              "sampleValue": "Afternoon",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "purpose",
+              "label": "Purpose",
+              "sampleValue": "Decision",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "decide",
+                  "label": "Decision"
+                },
+                {
+                  "value": "measure",
+                  "label": "Measurement"
+                },
+                {
+                  "value": "count",
+                  "label": "Count"
+                }
+              ],
+              "conditionSampleValue": "decide"
+            },
+            {
+              "token": "rule",
+              "label": "Rule",
+              "sampleValue": "Most votes",
+              "valueType": "enum",
+              "optional": true,
+              "options": [
+                {
+                  "value": "plurality",
+                  "label": "Most votes"
+                },
+                {
+                  "value": "approval",
+                  "label": "Approval"
+                },
+                {
+                  "value": "single_non_transferable",
+                  "label": "Single non-transferable vote"
+                },
+                {
+                  "value": "multiwinner_approval",
+                  "label": "Multiple winners by approval"
+                },
+                {
+                  "value": "approve_reject",
+                  "label": "Approve or reject"
+                },
+                {
+                  "value": "distribution",
+                  "label": "Distribution"
+                },
+                {
+                  "value": "ordered_scale",
+                  "label": "Ordered scale"
+                },
+                {
+                  "value": "sum",
+                  "label": "Sum"
+                }
+              ],
+              "conditionSampleValue": "plurality"
+            },
+            {
+              "token": "closing",
+              "label": "Closing",
+              "sampleValue": "12:22:57",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "quorum",
+              "label": "Quorum",
+              "sampleValue": "50%",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "tie",
+              "label": "Tie",
+              "sampleValue": "",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "electorate",
+              "label": "Electorate",
+              "sampleValue": "",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "delivery",
+              "label": "Delivery",
+              "sampleValue": "",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "disclosure",
+              "label": "Disclosure",
+              "sampleValue": "",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "consequences",
+              "label": "Consequences",
+              "sampleValue": "Update the event.",
+              "valueType": "text",
+              "optional": true
+            },
+            {
+              "token": "policy",
+              "label": "Policy",
+              "sampleValue": "After requester confirmation",
+              "valueType": "text",
+              "optional": true
+            }
+          ],
+          "templateMentions": {
+            "people": true,
+            "groups": true,
+            "all": true,
+            "targets": [
+              {
+                "id": "creator",
+                "label": "Poll creator"
+              },
+              {
+                "id": "eligibleVoters",
+                "label": "Eligible voters",
+                "description": "Captured electorate, excluding the bot"
+              },
+              {
+                "id": "currentGroup",
+                "label": "Current group"
+              }
+            ]
+          },
+          "templateDefaultFragment": true,
+          "placeholder": "*Question*\n{question}\n\n*Options*\n{options}\n\n*Purpose*: {purpose}\n*Rule*: {rule}\n*Closing*: {closing}\n*Quorum*: {quorum}\n*Tie*: {tie}\n*Who can vote*: {electorate}\n*Ballot delivery*: {delivery}\n*Voter disclosure*: {disclosure}{{#if consequences}}\n\n*Consequences*\n{consequences}\n*Apply result*: {policy}{{/if}}"
+        },
+        "dangerous": false,
+        "sensitivity": {
+          "sensitive": false,
+          "redact": "none"
+        },
+        "relatedCommandIds": [
+          "/poll",
+          "/poll create",
+          "/poll list",
+          "/poll status",
+          "/poll open",
+          "/poll close",
+          "/poll cancel",
+          "/poll resolve"
+        ],
+        "relatedActionIds": []
+      },
+      {
+        "pluginId": "official.poll-assistant",
         "path": "messages.activation",
         "id": "plugin.official.poll-assistant.messages.activation",
         "label": "Activation notice",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
         "section": "Messages",
-        "order": 502,
+        "order": 505,
         "schema": {
           "type": "string",
           "max": 14000
@@ -1625,7 +2079,7 @@
         "label": "Result",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
         "section": "Messages",
-        "order": 503,
+        "order": 506,
         "schema": {
           "type": "string",
           "max": 14000
@@ -1820,7 +2274,7 @@
         "label": "Result option row",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
         "section": "Messages",
-        "order": 504,
+        "order": 507,
         "schema": {
           "type": "string",
           "max": 14000
@@ -1975,7 +2429,7 @@
         "label": "Selection wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
         "section": "Messages",
-        "order": 505,
+        "order": 508,
         "schema": {
           "type": "string",
           "max": 14000
@@ -2210,7 +2664,7 @@
         "label": "Random draw wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
         "section": "Messages",
-        "order": 506,
+        "order": 509,
         "schema": {
           "type": "string",
           "max": 14000
@@ -2445,7 +2899,7 @@
         "label": "Tie wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
         "section": "Messages",
-        "order": 507,
+        "order": 510,
         "schema": {
           "type": "string",
           "max": 14000
@@ -2680,7 +3134,7 @@
         "label": "No decision wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
         "section": "Messages",
-        "order": 508,
+        "order": 511,
         "schema": {
           "type": "string",
           "max": 14000
@@ -2915,7 +3369,7 @@
         "label": "Insufficient turnout wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
         "section": "Messages",
-        "order": 509,
+        "order": 512,
         "schema": {
           "type": "string",
           "max": 14000
@@ -3150,7 +3604,7 @@
         "label": "Distribution wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
         "section": "Messages",
-        "order": 510,
+        "order": 513,
         "schema": {
           "type": "string",
           "max": 14000
@@ -3385,7 +3839,7 @@
         "label": "Scale wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
         "section": "Messages",
-        "order": 511,
+        "order": 514,
         "schema": {
           "type": "string",
           "max": 14000
@@ -3620,7 +4074,7 @@
         "label": "Count wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
         "section": "Messages",
-        "order": 512,
+        "order": 515,
         "schema": {
           "type": "string",
           "max": 14000
@@ -3855,7 +4309,7 @@
         "label": "Tie resolution notice",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
         "section": "Messages",
-        "order": 513,
+        "order": 516,
         "schema": {
           "type": "string",
           "max": 14000

@@ -21,6 +21,12 @@ export const pollTemplateDefinitions = {
     source: 'Poll closed: «{question}»'
   },
   publicationOption: { title: 'Publication option row', tokens: ['ordinal', 'label', 'option'], source: '{ordinal}. {label}' },
+  proposalOption: { title: 'Assistant proposal option row', tokens: ['ordinal', 'label', 'numericValue', 'option'], source: '{ordinal}) - {option}' },
+  assistantProposal: {
+    title: 'Assistant proposal summary',
+    tokens: ['question', 'options', 'purpose', 'rule', 'closing', 'quorum', 'tie', 'electorate', 'delivery', 'disclosure', 'consequences', 'policy'],
+    source: '*Question*\n{question}\n\n*Options*\n{options}\n\n*Purpose*: {purpose}\n*Rule*: {rule}\n*Closing*: {closing}\n*Quorum*: {quorum}\n*Tie*: {tie}\n*Who can vote*: {electorate}\n*Ballot delivery*: {delivery}\n*Voter disclosure*: {disclosure}{{#if consequences}}\n\n*Consequences*\n{consequences}\n*Apply result*: {policy}{{/if}}'
+  },
   activation: { title: 'Activation notice', tokens: [...contextTokens, 'closing', 'closesAt'], source: 'Closing time for «{question}»: {closing}' },
   result: {
     title: 'Result',
@@ -53,11 +59,11 @@ export const pollTemplateSamples: Record<string, string> = {
   deliveryNotice: 'poll published in this group.', options: 'Afternoon', purpose: 'Decision', rule: 'Most votes',
   closing: '12:22:57', closesAt: '12:22:57', quorum: '50%', tiePolicy: 'Authorized choice', ballotDelivery: 'Group',
   voterDisclosure: 'Named', activationTimeout: '120 minutes', postVoteAction: 'The selected option updates the event.',
-  ordinal: '1', label: 'Afternoon', option: 'Afternoon', outcome: 'Selected: Afternoon', responseCount: '2',
+  ordinal: '1', label: 'Afternoon', numericValue: '1', option: 'Afternoon', outcome: 'Selected: Afternoon', responseCount: '2',
   eligibleCount: '4', turnoutPercent: '50', optionResults: 'Afternoon: 2 responses (100% of respondents) (Ana, Rui)',
   count: '2', respondentPercent: '100', eligiblePercent: '50', voters: 'Ana, Rui', certainOptions: 'Afternoon',
   tiedOptions: 'Morning and afternoon', remainingSeats: '1', medianOptions: 'Afternoon', modeOptions: 'Afternoon',
-  total: '2', unit: 'items', resolver: 'Ana'
+  total: '2', unit: 'items', resolver: 'Ana', consequences: 'Update the event.', policy: 'After requester confirmation'
 };
 
 const numericTokens = new Set(['ordinal', 'count', 'responseCount', 'eligibleCount', 'turnoutPercent', 'respondentPercent', 'eligiblePercent', 'remainingSeats', 'total', 'activationTimeout']);

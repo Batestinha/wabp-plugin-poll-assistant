@@ -233,18 +233,22 @@ function quorumLabel(definition: PollDefinition, t: TranslateFn): string {
 }
 
 export function renderPollConfiguration(definition: PollDefinition, t: TranslateFn, timezone: string): string {
+  return t('official.poll-assistant.outcome.createRules', pollConfigurationValues(definition, t, timezone));
+}
+
+export function pollConfigurationValues(definition: PollDefinition, t: TranslateFn, timezone: string) {
   const closing = definition.closing;
   const deadline = closing.kind === 'manual' ? t('official.poll-assistant.flow.summary.manual')
     : closing.deadline.mode === 'at' ? `${closing.deadline.closesAt} (${timezone})`
       : closing.deadline.mode === 'after_first_non_creator_response' ? t('official.poll-assistant.flow.summary.afterFirstResponse', {
         minutes: closing.deadline.durationMinutes, timeoutMinutes: closing.deadline.activationTimeoutMinutes
       }) : t('official.poll-assistant.flow.summary.duration', { minutes: closing.deadline.durationMinutes });
-  return t('official.poll-assistant.outcome.createRules', { purpose: t(`official.poll-assistant.purpose.${definition.purpose}`),
+  return { purpose: t(`official.poll-assistant.purpose.${definition.purpose}`),
     rule: ruleLabel(definition, t), closing: deadline, quorum: quorumLabel(definition, t),
     tie: definition.purpose === 'decide' ? t(`official.poll-assistant.flow.tiePolicy.${tiePolicyKey(definition.tiePolicy.kind)}`) : '-',
     electorate: t(`official.poll-assistant.outcome.electorate.${definition.electorate.kind}`),
     delivery: t(`official.poll-assistant.flow.ballotDelivery.${definition.ballotDelivery}`),
-    disclosure: t(`official.poll-assistant.flow.voterDisclosure.${definition.voterDisclosure}`) });
+    disclosure: t(`official.poll-assistant.flow.voterDisclosure.${definition.voterDisclosure}`) };
 }
 
 function ruleLabel(definition: PollDefinition, t: TranslateFn): string {

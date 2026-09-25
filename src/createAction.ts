@@ -9,7 +9,8 @@ import { flowPreferences, resolvePollCreationPreset } from './commands';
 import { createPoll, getPollAggregate, pollsDatabase } from './store';
 import { enqueuePollPublishJob } from './jobs';
 import { canonicalPollOutcomeProgram, freezePollOutcome, renderPollOutcomeProgram, pollOutcomeResultSchema } from './outcomeConfig';
-import { renderPollConfiguration } from './announcements';
+import { pollConfigurationValues, renderPollConfiguration } from './announcements';
+import { renderPollTemplate } from './templates';
 import { pollDefinitionSchema } from './domain';
 
 export function registerPollCreateAction(context: PluginServiceRegistrationContext): PluginServiceRegistration {
@@ -47,9 +48,19 @@ export function registerPollCreateAction(context: PluginServiceRegistrationConte
         rules: renderPollConfiguration(input.definition, current.t, current.config.timezone),
         consequences: outcome ? renderPollOutcomeProgram(outcome, input.definition, current.t) : current.t('official.poll-assistant.outcome.none'),
         policy: input.outcome ? current.t(`official.poll-assistant.outcome.policy.${input.outcome.policy}`) : '-' });
-      return { input, summary, entries: [
+      const options = input.definition.options.map((option) => renderPollTemplate({ kind: 'proposalOption', overrides: current.config.messages, t: current.t, values: {
+        ordinal: option.ordinal, label: option.label, numericValue: option.numericValue,
+        option: `${option.label}${option.numericValue !== undefined ? ` = ${option.numericValue}` : ''}`
+      } })).join('\n');
+      const proposalText = renderPollTemplate({ kind: 'assistantProposal', overrides: current.config.messages, t: current.t, values: {
+        question: input.definition.question, options,
+        ...pollConfigurationValues(input.definition, current.t, current.config.timezone),
+        ...(outcome && input.outcome ? { consequences: renderPollOutcomeProgram(outcome, input.definition, current.t),
+          policy: current.t(`official.poll-assistant.outcome.policy.${input.outcome.policy}`) } : {})
+      } });
+      return { input, summary, proposalText, entries: [
         { title: current.t('official.poll-assistant.outcome.entry.question'), value: input.definition.question },
-        { title: current.t('official.poll-assistant.outcome.entry.options'), value: input.definition.options.map((option) => `${option.label}${option.numericValue !== undefined ? ` = ${option.numericValue}` : ''}`).join('\n') },
+        { title: current.t('official.poll-assistant.outcome.entry.options'), value: options },
         { title: current.t('official.poll-assistant.outcome.entry.rule'), value: renderPollConfiguration(input.definition, current.t, current.config.timezone) },
         ...(outcome ? [{ title: current.t('official.poll-assistant.outcome.entry.consequences'), value: renderPollOutcomeProgram(outcome, input.definition, current.t) }] : [])
       ], guard: { inputDigest: workflowDigest(input), ...(outcome ? { outcome } : {}) },

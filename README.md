@@ -2,7 +2,7 @@
 
 Durable group and private polls, editable publication and result messages, named or hidden ballots, and configured workflow outcomes.
 
-Standalone WABS package `official.poll-assistant` version `0.7.3`, requiring WABP core API `^0.3.10`. It preserves the plugin ID, account-owned `polls` database, scoped settings, creation recipes, queue keys and receipt formats. Data version 9 adds durable pin and close-edit lifecycle state. Existing queued messages retain their text and recipients. Deploy a compatible reader before enabling new producers; an application downgrade must preserve writes accepted by the newer release.
+Standalone WABS package `official.poll-assistant` version `0.7.4`, requiring WABP core API `^0.3.10`. It preserves the plugin ID, account-owned `polls` database, scoped settings, creation recipes, queue keys and receipt formats. Data version 9 adds durable pin and close-edit lifecycle state. Existing queued messages retain their text and recipients. Deploy a compatible reader before enabling new producers; an application downgrade must preserve writes accepted by the newer release.
 
 Scope clocks supply default timezones. Existing UTC deadlines remain fixed. Poll messages use the original cutoff, even when result delivery is delayed. Templates support localized defaults, validation, conditional sections and pagination. Voter names only appear for named ballots; result names do not generate notification mentions.
 
@@ -29,6 +29,11 @@ Publication notification settings migrate once to an Eligible voters mention chi
 preserving effective scope/identity overrides and custom prose. The host backs up
 all original layers in the same transaction. `{{default}}` preserves the localized
 default message; the old decorative `@all —` delivery notice prefix is removed.
+
+The `Assistant proposal summary` and `Assistant proposal option row` settings
+control the approval preview produced for new polls. The default summary uses
+bold labels for each resolved setting, and the default option row begins
+`1) - ...`. Existing approval messages retain their saved text and digest.
 
 Poll message lifecycle settings are available in Poll Assistant settings. `Pin active
 polls` pins the native group ballot (or the publication for private ballots) and
