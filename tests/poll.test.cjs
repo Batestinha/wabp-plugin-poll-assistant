@@ -264,11 +264,11 @@ test('assistant proposal template has one bold rule and configurable option rows
     renderPollTemplate({ kind: 'proposalOption', t, values: { ordinal: 1, label: '1', numericValue: 1, option: '1' } }),
     renderPollTemplate({ kind: 'proposalOption', t, values: { ordinal: 2, label: '2', numericValue: 2, option: '2' } })
   ].join('\n');
-  assert.equal(options, '1) 1\n2) 2');
+  assert.equal(options, '*1*) 1\n*2*) 2');
   const values = { ...pollTemplateSamples, question: 'Quantos cafés?', options, rule: 'Somar os cafés', consequences: undefined };
   const proposal = renderPollTemplate({ kind: 'assistantProposal', t, values });
   assert.match(proposal, /\*Pergunta\*\nQuantos cafés\?/);
-  assert.match(proposal, /\*Opções\*\n1\) 1/);
+  assert.match(proposal, /\*Opções\*\n\*1\*\) 1/);
   assert.equal((proposal.match(/\*Regra\*/g) ?? []).length, 1);
   assert.match(proposal, /\*Regra\*: Somar os cafés/);
   assert.doesNotMatch(proposal, /\*Regra\*\n/);
@@ -276,7 +276,7 @@ test('assistant proposal template has one bold rule and configurable option rows
     proposalOption: '{ordinal}. {label}', assistantProposal: '{question}\n{options}'
   } });
   assert.equal(renderPollTemplate({ kind: 'proposalOption', t, values: { ordinal: 1, label: '1', option: '1' }, overrides: configured.messages }), '1. 1');
-  assert.equal(renderPollTemplate({ kind: 'assistantProposal', t, values, overrides: configured.messages }), 'Quantos cafés?\n1) 1\n2) 2');
+  assert.equal(renderPollTemplate({ kind: 'assistantProposal', t, values, overrides: configured.messages }), 'Quantos cafés?\n*1*) 1\n*2*) 2');
 });
 
 test('long result pages preserve every Unicode codepoint and blank overrides restore localized defaults', () => {

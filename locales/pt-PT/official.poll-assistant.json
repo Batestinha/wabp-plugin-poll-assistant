@@ -257,7 +257,7 @@
   "official.poll-assistant.outcome.field.quorumMet": "Quórum atingido",
   "official.poll-assistant.template.publication": "{deliveryNotice}\n\nPergunta: {question}\nOpções:\n{options}\n\nFinalidade: {purpose}\nRegra: {rule}\nEncerramento: {closing}{{#if postVoteAction}}\n\n{postVoteAction}{{/if}}",
   "official.poll-assistant.template.publicationOption": "{ordinal}. {label}",
-  "official.poll-assistant.template.proposalOption": "{ordinal}) {option}",
+  "official.poll-assistant.template.proposalOption": "*{ordinal}*) {option}",
   "official.poll-assistant.template.assistantProposal": "*Pergunta*\n{question}\n\n*Opções*\n{options}\n\n*Objetivo*: {purpose}\n*Regra*: {rule}\n*Fecho*: {closing}\n*Quórum*: {quorum}\n*Empate*: {tie}\n*Quem pode votar*: {electorate}\n*Entrega do boletim*: {delivery}\n*Identificação dos votantes*: {disclosure}{{#if consequences}}\n\n*Consequências*\n{consequences}\n*Aplicar resultado*: {policy}{{/if}}",
   "official.poll-assistant.template.activation": "Encerramento de «{question}»: {closing}",
   "official.poll-assistant.template.result": "Sondagem encerrada: «{question}»\n\n*{outcome}*\n\nRespostas: {responseCount} de {eligibleCount} eleitores elegíveis ({turnoutPercent}%)\n\n{optionResults}",
