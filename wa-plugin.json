@@ -4,7 +4,7 @@
   "name": "Poll Assistant",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "kind": "managed_group",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "coreApiRange": "^0.3.10",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
@@ -4810,21 +4810,17 @@
             "type": "string",
             "title": "Group"
           },
+          "presetId": {
+            "type": "string",
+            "description": "Optional enabled creation preset ID. The scope default preset is used when omitted."
+          },
           "definition": {
             "type": "object",
-            "description": "Poll definition schema version 1. Use id \"draft\" and stable option IDs option:1, option:2, etc. All rules, closing, quorum, ballot delivery and disclosure must be explicit.",
+            "description": "Poll definition schema version 1. Use id \"draft\" and stable option IDs option:1, option:2, etc. Omitted settings resolve from the selected or scoped default creation preset.",
             "required": [
-              "schemaVersion",
-              "id",
               "purpose",
               "question",
-              "options",
-              "closing",
-              "quorum",
-              "electorate",
-              "ballotDelivery",
-              "voterDisclosure",
-              "rule"
+              "options"
             ],
             "properties": {
               "schemaVersion": {
@@ -4866,7 +4862,7 @@
                     },
                     "numericValue": {
                       "type": "integer",
-                      "minimum": 0
+                      "minimum": 1
                     }
                   }
                 }

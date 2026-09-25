@@ -260,6 +260,7 @@ test('long result pages preserve every Unicode codepoint and blank overrides res
 
 test('the archive retains every SQL migration and all declared translations and controls', () => {
   const metadata = require('../wa-plugin.json');
+  assert.deepEqual(metadata.workflowActions, plugin.manifest.workflowActions);
   assert.equal(metadata.dataVersion, '9');
   assert.equal(metadata.databases[0].name, 'polls');
   assert.equal(migrations.length, 8);
