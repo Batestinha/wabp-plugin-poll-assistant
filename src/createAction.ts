@@ -4,7 +4,8 @@ import type { PluginServiceRegistration, PluginServiceCallContext } from '@wabs/
 import { pluginWorkflowGroupCapabilities } from '@wabs/plugin-sdk/durable-plugin';
 import { canonicalJson, workflowDigest, preparedActionSchema, workflowActionResultSchema, type WorkflowActionResult, type WorkflowProgram } from '@wabs/plugin-sdk/workflows';
 import { parsePollAssistantConfig } from './config';
-import { POLL_CREATE_ACTION_SERVICE, pollCreateAction, pollCreateActionInputSchema } from './createActionApi';
+import { POLL_CREATE_ACTION_SERVICE, pollCreateAction, pollCreateActionInputSchema, pollCreateActionDraftInputSchema } from './createActionApi';
+import { flowPreferences, resolvePollCreationPreset } from './commands';
 import { createPoll, getPollAggregate, pollsDatabase } from './store';
 import { enqueuePollPublishJob } from './jobs';
 import { canonicalPollOutcomeProgram, freezePollOutcome, renderPollOutcomeProgram, pollOutcomeResultSchema } from './outcomeConfig';
@@ -26,8 +27,14 @@ export function registerPollCreateAction(context: PluginServiceRegistrationConte
     { name: 'prepare', access: 'read', inputSchema: read, outputSchema: preparedActionSchema, handler: async (raw, call) => {
       const request = read.parse(raw);
       if (request.bindings?.length) throw new Error('Poll creation does not accept result bindings');
-      const input = pollCreateActionInputSchema.parse(request.input);
-      const current = await requester(context, call, input);
+      const draft = pollCreateActionDraftInputSchema.parse(request.input);
+      const current = await requester(context, call, { groupWid: draft.groupWid });
+      const input = pollCreateActionInputSchema.parse({
+        groupWid: draft.groupWid,
+        definition: resolveCreationDefinition(draft.definition, current.config, draft.presetId),
+        ...(draft.outcome ? { outcome: draft.outcome } : {})
+      });
+      await requester(context, call, input);
       let outcome: WorkflowProgram | undefined;
       if (input.outcome) {
         if (!context.flowEngine?.workflowActions) throw new Error('Poll outcome catalog unavailable');
@@ -40,7 +47,12 @@ export function registerPollCreateAction(context: PluginServiceRegistrationConte
         rules: renderPollConfiguration(input.definition, current.t, current.config.timezone),
         consequences: outcome ? renderPollOutcomeProgram(outcome, input.definition, current.t) : current.t('official.poll-assistant.outcome.none'),
         policy: input.outcome ? current.t(`official.poll-assistant.outcome.policy.${input.outcome.policy}`) : '-' });
-      return { input, summary, guard: { inputDigest: workflowDigest(input), ...(outcome ? { outcome } : {}) },
+      return { input, summary, entries: [
+        { title: current.t('official.poll-assistant.outcome.entry.question'), value: input.definition.question },
+        { title: current.t('official.poll-assistant.outcome.entry.options'), value: input.definition.options.map((option) => `${option.label}${option.numericValue !== undefined ? ` = ${option.numericValue}` : ''}`).join('\n') },
+        { title: current.t('official.poll-assistant.outcome.entry.rule'), value: renderPollConfiguration(input.definition, current.t, current.config.timezone) },
+        ...(outcome ? [{ title: current.t('official.poll-assistant.outcome.entry.consequences'), value: renderPollOutcomeProgram(outcome, input.definition, current.t) }] : [])
+      ], guard: { inputDigest: workflowDigest(input), ...(outcome ? { outcome } : {}) },
         effects: [{ resource: `poll:new:${input.groupWid}`, fields: ['publication'], description: summary }] };
     } },
     { name: 'execute', access: 'mutation', inputSchema: execute, outputSchema: workflowActionResultSchema, handler: async (raw, call) => {
@@ -84,12 +96,66 @@ export function registerPollCreateAction(context: PluginServiceRegistrationConte
   ] };
 }
 
-async function requester(context: PluginServiceRegistrationContext, call: PluginServiceCallContext, input?: z.infer<typeof pollCreateActionInputSchema>) {
+export function resolveCreationDefinition(raw: Record<string, unknown>, config: ReturnType<typeof parsePollAssistantConfig>, requestedPresetId?: string) {
+  const selection = resolvePollCreationPreset(config, requestedPresetId);
+  if (selection.kind === 'not_found') throw new Error(`Poll creation preset ${selection.presetId} is unavailable`);
+  const preset = selection.preset;
+  const preferences = flowPreferences(config, preset);
+  const fixed = (field: string, mode: string | undefined, supplied: unknown, value: unknown) => {
+    if (mode === 'fixed' && supplied !== undefined && workflowDigest(supplied) !== workflowDigest(value)) {
+      throw new Error(`Poll creation preset fixes ${field}`);
+    }
+    return supplied ?? value;
+  };
+  const purpose = fixed('purpose', preset?.purpose.mode, raw.purpose, preset?.purpose.value ?? 'decide');
+  const ballotDelivery = fixed('ballotDelivery', preset?.ballotDelivery.mode, raw.ballotDelivery, preset?.ballotDelivery.value ?? 'group');
+  const voterDisclosure = fixed('voterDisclosure', preset?.voterDisclosure.mode, raw.voterDisclosure, preset?.voterDisclosure.value ?? 'named');
+  const closing = preferences.defaultClosing.kind === 'manual'
+    ? { kind: 'manual' }
+    : { kind: 'deadline', deadline: preferences.defaultClosing.kind === 'deadline'
+      ? { mode: 'after_publish', durationMinutes: preferences.defaultClosing.durationMinutes }
+      : { mode: 'after_first_non_creator_response', durationMinutes: preferences.defaultClosing.durationMinutes,
+        activationTimeoutMinutes: preferences.defaultClosing.activationTimeoutMinutes } };
+  const rule = purpose === 'count'
+    ? { kind: 'sum', unit: preset?.countUnit.value ?? 'items' }
+    : purpose === 'measure'
+      ? preset?.measureRule.kind === 'ordered_scale' ? { kind: 'ordered_scale' }
+        : { kind: 'distribution', allowMultipleAnswers: preset?.measureRule.kind === 'distribution_multiple' }
+      : preset?.decideRule.kind === 'single_non_transferable' || preset?.decideRule.kind === 'multiwinner_approval'
+        ? { kind: preset.decideRule.kind, seats: preset.decideRule.seats }
+        : preset?.decideRule.kind === 'approve_reject'
+          ? { kind: 'approve_reject', approveOptionId: (raw.options as Array<{ id: string }> | undefined)?.[0]?.id,
+            rejectOptionId: (raw.options as Array<{ id: string }> | undefined)?.[1]?.id,
+            minimumApprovalBasisPoints: preset.decideRule.minimumApprovalBasisPoints }
+          : { kind: preset?.decideRule.kind ?? 'plurality' };
+  const ruleMode = purpose === 'count' ? preset?.countUnit.mode : purpose === 'measure' ? preset?.measureRule.mode : preset?.decideRule.mode;
+  const result = pollDefinitionSchema.parse({
+    schemaVersion: raw.schemaVersion ?? 1,
+    id: raw.id ?? 'draft',
+    ...raw,
+    purpose,
+    rule: fixed('rule', ruleMode, raw.rule, rule),
+    closing: fixed('closing', preset?.closing.mode, raw.closing, closing),
+    quorum: fixed('quorum', preset?.quorum.mode, raw.quorum, preferences.defaultQuorum),
+    ballotDelivery,
+    voterDisclosure,
+    electorate: raw.electorate ?? { kind: ballotDelivery === 'private' ? 'group_members_until_cutoff' : 'members_at_publication' },
+    ...(purpose === 'decide' ? { tiePolicy: fixed('tiePolicy', preset?.tiePolicy.mode, raw.tiePolicy,
+      { kind: preset?.tiePolicy.kind ?? 'no_decision' }) } : {})
+  });
+  if (result.purpose === 'count' && result.options.some((option) => option.numericValue === 0)) {
+    throw new Error('Count poll option values must be greater than zero.');
+  }
+  return result;
+}
+
+async function requester(context: PluginServiceRegistrationContext, call: PluginServiceCallContext,
+  input?: { groupWid: string; definition?: z.infer<typeof pollDefinitionSchema> }) {
   if (!call.actorIdentityId || !context.resolveStableIdentityById || !await context.enabledFor(call.scopeId)) throw new Error('Poll requester unavailable');
   const actor = await context.resolveStableIdentityById(call.actorIdentityId);
   if (actor.identityId !== call.actorIdentityId) throw new Error('Requester identity mismatch');
   const config = parsePollAssistantConfig(await context.configFor(call.scopeId, actor.identityId));
-  const t = await context.i18n.translatorForIdentity(actor.identityId, call.scopeId);
+  const t = await context.i18n.translatorForScope(call.scopeId);
   if (!config.allowCreation) throw new Error(t('official.poll-assistant.creationDisabled'));
   const groupWid = input?.groupWid ?? call.groupWid;
   if (!groupWid || (call.groupWid && groupWid !== call.groupWid)) throw new Error(t('official.poll-assistant.groupRequired'));
@@ -99,12 +165,12 @@ async function requester(context: PluginServiceRegistrationContext, call: Plugin
   if (!permission?.allowed) throw new Error(t('official.poll-assistant.permissionDenied'));
   const caps = await pluginWorkflowGroupCapabilities(context, groupWid);
   if (!caps.botIsAdmin || !caps.canSend) throw new Error(t('official.poll-assistant.botCapabilityUnavailable'));
-  const closing = input?.definition.closing;
+  const closing = input?.definition?.closing;
   if (closing?.kind === 'deadline') {
     const duration = closing.deadline.mode === 'at' ? (Date.parse(closing.deadline.closesAt) - Date.now()) / 60000 : closing.deadline.durationMinutes;
     if (duration <= 0 || duration > config.maxDeadlineMinutes) throw new Error(t('official.poll-assistant.completionClosingInvalid', { maximumMinutes: config.maxDeadlineMinutes }));
   }
-  if (input?.definition.electorate.kind === 'actor') throw new Error('Interactive creation requires a group electorate');
+  if (input?.definition?.electorate.kind === 'actor') throw new Error('Interactive creation requires a group electorate');
   return { actor, config, t };
 }
 

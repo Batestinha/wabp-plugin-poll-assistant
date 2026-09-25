@@ -6,7 +6,7 @@ const metadata = JSON.parse(fs.readFileSync(path.join(root, 'wa-plugin.json')));
 const plugin = require(path.join(root, metadata.entrypoint)).default;
 assert.equal(plugin.manifest.pluginId, 'official.poll-assistant');
 assert.equal(plugin.manifest.version, metadata.version);
-assert.equal(plugin.manifest.coreApiRange, '^0.3.8');
+assert.equal(plugin.manifest.coreApiRange, '^0.3.10');
 for (const method of ['registerCommands', 'registerCancellations', 'registerHooks', 'registerServices']) assert.equal(typeof plugin[method], 'function');
 assert.equal(typeof plugin.lifecycle.onUpdate, 'function');
 const pt = JSON.parse(fs.readFileSync(path.join(root, 'locales/pt-PT/official.poll-assistant.json')));

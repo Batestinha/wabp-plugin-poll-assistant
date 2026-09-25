@@ -104,7 +104,7 @@ export const pollCreationRecipeSchema = z.object({
 
 export interface PollCreationFlowStarterContext {
   flowEngine: FlowEngine;
-  i18n: Pick<I18nService, 'resolveIdentityLocale' | 'translator'>;
+  i18n: Pick<I18nService, 'resolveScopeLocale' | 'translator'>;
 }
 
 export interface StartPollCreationFlowInput {
@@ -158,7 +158,7 @@ export class PollCreationFlowStarter {
     const pollId = stableIds.pollId;
     const roundId = stableIds.roundId;
     const flowType = `${POLL_CREATION_FLOW_TYPE_PREFIX}${pollId}`;
-    const locale = await this.context.i18n.resolveIdentityLocale(actorIdentityId, scopeId);
+    const locale = await this.context.i18n.resolveScopeLocale(scopeId);
     const recipe = pollCreationRecipeSchema.parse({
       schemaVersion: 1,
       flowType,

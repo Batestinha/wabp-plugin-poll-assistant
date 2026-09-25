@@ -979,7 +979,7 @@ function parseCountOptions(raw: string): PollCreationOptionAnswer[] | undefined 
     const label = separator >= 0 ? line.slice(0, separator).trim() : '';
     const valueText = separator >= 0 ? line.slice(separator + 1).trim() : '';
     const numericValue = Number(valueText);
-    return label && /^\d+$/u.test(valueText) && Number.isSafeInteger(numericValue)
+    return label && /^\d+$/u.test(valueText) && Number.isSafeInteger(numericValue) && numericValue > 0
       ? [{ label, numericValue }]
       : [];
   });
@@ -1253,7 +1253,7 @@ function optionAnswers(value: unknown): PollCreationOptionAnswer[] | undefined {
     if (candidate.numericValue === undefined) {
       return [{ label: candidate.label.trim() }];
     }
-    return Number.isSafeInteger(candidate.numericValue) && Number(candidate.numericValue) >= 0
+    return Number.isSafeInteger(candidate.numericValue) && Number(candidate.numericValue) > 0
       ? [{ label: candidate.label.trim(), numericValue: Number(candidate.numericValue) }]
       : [];
   });

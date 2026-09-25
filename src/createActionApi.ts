@@ -8,6 +8,12 @@ export const pollCreateActionInputSchema = z.object({
   groupWid: z.string().min(1), definition: pollDefinitionSchema,
   outcome: z.object({ policy: z.enum(['automatic', 'requester_confirmation']), program: workflowProgramSchema }).strict().optional()
 }).strict();
+export const pollCreateActionDraftInputSchema = z.object({
+  groupWid: z.string().min(1),
+  definition: z.record(z.unknown()),
+  presetId: z.string().trim().min(1).optional(),
+  outcome: pollCreateActionInputSchema.shape.outcome
+}).strict();
 export const pollCreateAction: WorkflowActionDeclaration = {
   actionId: 'official.poll-assistant.create', version: 1, sources: ['assistant'],
   titleKey: 'official.poll-assistant.outcome.createTitle', descriptionKey: 'official.poll-assistant.outcome.createDescription',
@@ -15,11 +21,12 @@ export const pollCreateAction: WorkflowActionDeclaration = {
   requiredPermissions: [], requiredBotCapabilities: ['botIsAdmin', 'canSend'],
   inputSchema: { type: 'object', required: ['groupWid', 'definition'], additionalProperties: false, properties: {
     groupWid: { type: 'string', title: 'Group' },
-    definition: { type: 'object', description: 'Poll definition schema version 1. Use id "draft" and stable option IDs option:1, option:2, etc. All rules, closing, quorum, ballot delivery and disclosure must be explicit.',
-      required: ['schemaVersion', 'id', 'purpose', 'question', 'options', 'closing', 'quorum', 'electorate', 'ballotDelivery', 'voterDisclosure', 'rule'],
+    presetId: { type: 'string', description: 'Optional enabled creation preset ID. The scope default preset is used when omitted.' },
+    definition: { type: 'object', description: 'Poll definition schema version 1. Use id "draft" and stable option IDs option:1, option:2, etc. Omitted settings resolve from the selected or scoped default creation preset.',
+      required: ['purpose', 'question', 'options'],
       properties: { schemaVersion: { const: 1 }, id: { type: 'string' }, purpose: { enum: ['decide', 'measure', 'count'] }, question: { type: 'string' },
         options: { type: 'array', minItems: 2, maxItems: 12, items: { type: 'object', required: ['id', 'label', 'ordinal'], properties: {
-          id: { type: 'string' }, label: { type: 'string' }, ordinal: { type: 'integer' }, numericValue: { type: 'integer', minimum: 0 } } } },
+          id: { type: 'string' }, label: { type: 'string' }, ordinal: { type: 'integer' }, numericValue: { type: 'integer', minimum: 1 } } } },
         closing: { type: 'object', description: 'kind manual, or kind deadline with deadline: {mode:after_publish,durationMinutes} / {mode:at,closesAt ISO timestamp} / {mode:after_first_non_creator_response,durationMinutes,activationTimeoutMinutes}' },
         quorum: { type: 'object', description: 'kind none, absolute with minimumResponses, or percentage with minimumTurnoutBasisPoints' },
         electorate: { type: 'object', properties: { kind: { enum: ['members_at_publication', 'group_members_until_cutoff'] } } },

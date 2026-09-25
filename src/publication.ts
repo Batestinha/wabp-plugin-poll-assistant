@@ -50,6 +50,8 @@ import {
   type StoredPollRoundSnapshot
 } from './store';
 import { reconcilePollRoundTiming } from './timing';
+import { ensurePollPublicationAnnouncement } from './announcements';
+import { deliverPollMessage } from './delivery';
 
 const PUBLICATION_FAILURE_MESSAGE_KEY = 'official.poll-assistant.failure.publication';
 
@@ -111,6 +113,24 @@ export async function publishPollRound(
     );
     let sendSnapshot = requireClaimedSnapshot(db, claim);
     requireTallyTotalWithinSafeInteger(sendSnapshot, electorate.length);
+    // The introduction has its own durable idempotency receipt. Complete every
+    // page before crossing any native poll provider boundary.
+    if (sendSnapshot.round.announcementsRequired) {
+      await ensurePollPublicationAnnouncement(context, roundId, clock());
+      const introductions = db.all<{ id: string }>(
+        `SELECT id FROM poll_deliveries WHERE delivery_batch_key = ? ORDER BY delivery_sequence ASC`,
+        `poll-announcements:${roundId}`
+      ).filter((row) => row.id.startsWith(`poll-announcement:${roundId}:published`));
+      if (!introductions.length) throw new Error('Poll introduction has no durable delivery receipt.');
+      for (const introduction of introductions) {
+        if (getPollDelivery(db, introduction.id)?.status !== 'sent') {
+          await deliverPollMessage(context, introduction.id, clock);
+        }
+        if (getPollDelivery(db, introduction.id)?.status !== 'sent') {
+          throw new Error('Poll introduction is awaiting a confirmed delivery receipt.');
+        }
+      }
+    }
     if (sendSnapshot.poll.definition.ballotDelivery === 'private') {
       const activationBoundaryAt = clock();
       requirePrivateFanoutWindow(sendSnapshot, electorate.length, activationBoundaryAt);

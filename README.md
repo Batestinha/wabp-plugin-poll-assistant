@@ -2,7 +2,7 @@
 
 Durable group and private polls, editable publication and result messages, named or hidden ballots, and configured workflow outcomes.
 
-Standalone WABS package `official.poll-assistant` version `0.7.1`, requiring WABP core API `^0.3.8`. It preserves the plugin ID, account-owned `polls` database, scoped settings, creation recipes, queue keys and receipt formats. Data version 9 adds durable pin and close-edit lifecycle state. Existing queued messages retain their text and recipients. Deploy a compatible reader before enabling new producers; an application downgrade must preserve writes accepted by the newer release.
+Standalone WABS package `official.poll-assistant` version `0.7.2`, requiring WABP core API `^0.3.10`. It preserves the plugin ID, account-owned `polls` database, scoped settings, creation recipes, queue keys and receipt formats. Data version 9 adds durable pin and close-edit lifecycle state. Existing queued messages retain their text and recipients. Deploy a compatible reader before enabling new producers; an application downgrade must preserve writes accepted by the newer release.
 
 Scope clocks supply default timezones. Existing UTC deadlines remain fixed. Poll messages use the original cutoff, even when result delivery is delayed. Templates support localized defaults, validation, conditional sections and pagination. Voter names only appear for named ballots; result names do not generate notification mentions.
 

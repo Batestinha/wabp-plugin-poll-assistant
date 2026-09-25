@@ -442,6 +442,9 @@ export function pollsDatabase(registry: PluginDatabaseRegistry | undefined): Plu
 
 export function createPoll(db: PluginDatabase, input: CreatePollInput): StoredPollAggregate {
   const definition = pollDefinitionSchema.parse(input.definition);
+  if (definition.purpose === 'count' && definition.options.some((option) => option.numericValue === 0)) {
+    throw new Error('Count poll option values must be greater than zero.');
+  }
   const createdAt = timestampSchema.parse(input.createdAt);
   const scopeId = required(input.scopeId, 'scopeId');
   const chatId = required(input.chatId, 'chatId');

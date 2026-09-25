@@ -24,7 +24,7 @@ export async function ensurePollPublicationAnnouncement(
   now = new Date()
 ): Promise<boolean> {
   const snapshot = getPollLifecycleByRoundId(pollsDatabase(context.databases), roundId);
-  if (!snapshot?.round.publishedAt || !snapshot.round.announcementsRequired) {
+  if (!snapshot?.round.announcementsRequired) {
     return false;
   }
   const existingDelivery = getPollDelivery(pollsDatabase(context.databases), `poll-announcement:${roundId}:published`);

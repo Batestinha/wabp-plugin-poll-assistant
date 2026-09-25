@@ -9,8 +9,12 @@ const { pollDefinitionSchema } = require('../dist/domain');
 const { createPoll, getPollAggregate, getPollDelivery, ensurePollLifecycleDelivery,
   listPollRoundIdsMissingAnnouncements } = require('../dist/store');
 const { enqueuePollPublishJob } = require('../dist/jobs');
+const { publishPollRound } = require('../dist/publication');
+const { TransportProviderUnavailableError } = require('@wabs/plugin-sdk/transport-errors');
 const { renderPollTemplate, paginatePollText, pollTemplateSamples } = require('../dist/templates');
 const { parsePollAssistantConfig } = require('../dist/config');
+const { resolveCreationDefinition } = require('../dist/createAction');
+const { closePoll } = require('../dist/commands');
 const pt = require('../locales/pt-PT/official.poll-assistant.json');
 const t = (key, params) => (pt[key] ?? key).replace(/\{(\w+)\}/g, (token, name) => String(params?.[name] ?? token));
 const timestamp = '2026-09-12T10:00:00.000Z';
@@ -42,6 +46,115 @@ function seed(db) {
     creatorIdentityId: 'fixture-actor', creatorWid: 'fixture@c.us', creatorLabel: 'Fixture actor',
     roundId: 'fixture-round', publishIdempotencyKey: 'fixture-publish', maxActivePollsPerChat: 10, createdAt: timestamp });
 }
+
+test('assistant creation resolves scoped defaults and fixed presets before approval', () => {
+  const config = parsePollAssistantConfig({
+    defaultClosingMode: 'manual', defaultQuorumMode: 'absolute', defaultAbsoluteQuorumResponses: 3,
+    creationPresets: [{ id: 'quick', label: 'Quick', isDefault: true,
+      closing: { mode: 'fixed', kind: 'duration', durationMinutes: 30 },
+      quorum: { mode: 'fixed', kind: 'percentage', minimumTurnoutBasisPoints: 6000 },
+      decideRule: { mode: 'fixed', kind: 'approval' } }]
+  });
+  const draft = { purpose: 'decide', question: 'Morning or afternoon?',
+    options: [{ id: 'one', label: 'Morning', ordinal: 1 }, { id: 'two', label: 'Afternoon', ordinal: 2 }] };
+  const resolved = resolveCreationDefinition(draft, config);
+  assert.deepEqual(resolved.closing, { kind: 'deadline', deadline: { mode: 'after_publish', durationMinutes: 30 } });
+  assert.deepEqual(resolved.quorum, { kind: 'percentage', minimumTurnoutBasisPoints: 6000 });
+  assert.deepEqual(resolved.rule, { kind: 'approval' });
+  assert.throws(() => resolveCreationDefinition({ ...draft, closing: { kind: 'manual' } }, config), /fixes closing/);
+  const scoped = resolveCreationDefinition(draft, parsePollAssistantConfig({ defaultClosingMode: 'manual',
+    defaultQuorumMode: 'absolute', defaultAbsoluteQuorumResponses: 3 }));
+  assert.deepEqual(scoped.closing, { kind: 'manual' });
+  assert.deepEqual(scoped.quorum, { kind: 'absolute', minimumResponses: 3 });
+});
+
+test('new count polls reject zero while legacy stored zero values remain readable', () => {
+  const db = open(':memory:'); migrate(db, migrations);
+  try {
+    const definition = pollDefinitionSchema.parse({ schemaVersion: 1, id: 'count-poll', purpose: 'count',
+      question: 'How many?', options: [{ id: 'one', label: 'One', ordinal: 1, numericValue: 1 },
+        { id: 'two', label: 'Two', ordinal: 2, numericValue: 2 }],
+      rule: { kind: 'sum', unit: 'items' }, closing: { kind: 'manual' }, quorum: { kind: 'none' },
+      electorate: { kind: 'members_at_publication' } });
+    const input = { definition, scopeId: 'fixture-scope', chatId: 'fixture@g.us',
+      creatorIdentityId: 'fixture-actor', creatorWid: 'fixture@c.us', creatorLabel: 'Fixture actor',
+      roundId: 'count-round', publishIdempotencyKey: 'count-publish', maxActivePollsPerChat: 10, createdAt: timestamp };
+    assert.throws(() => createPoll(db, { ...input, definition: { ...definition, options: [
+      { ...definition.options[0], numericValue: 0 }, definition.options[1]
+    ] } }), /greater than zero/);
+    createPoll(db, input);
+    db.run('UPDATE polls SET definition_json = ? WHERE id = ?', JSON.stringify({ ...definition,
+      options: [{ ...definition.options[0], numericValue: 0 }, definition.options[1]] }), definition.id);
+    db.run('UPDATE poll_options SET numeric_value = 0 WHERE poll_id = ? AND id = ?', definition.id, 'one');
+    assert.equal(getPollAggregate(db, definition.id).poll.definition.options[0].numericValue, 0);
+  } finally { db.close(); }
+});
+
+test('close asks for confirmation with one open poll and selection with several', async () => {
+  const db = open(':memory:'); migrate(db, migrations);
+  try {
+    seed(db);
+    db.run("UPDATE poll_rounds SET status = 'open', closes_at = '2030-01-01T00:00:00.000Z' WHERE id = 'fixture-round'");
+    const prompts = [];
+    const context = { pluginId: plugin.manifest.pluginId, manifest: plugin.manifest,
+      dataStore: {}, configFor: async () => ({}), ephemeralStore: {}, setConfig: async () => undefined,
+      enqueuePluginJob: async () => undefined, databases: { open: () => db },
+      flowEngine: { promptChoice: async input => { prompts.push(input); return { flowPromptId: String(prompts.length), messageIds: [] }; } },
+      i18n: { translatorForScope: async () => t } };
+    const command = { scopeId: 'fixture-scope', groupWid: 'fixture@g.us', locale: 'pt-PT', t,
+      actor: { identityAddress: { identityId: 'fixture-actor' } },
+      message: { id: 'close-one', chatId: 'fixture@g.us', context: 'group' },
+      command: { args: [] }, remainingArgs: [] };
+    assert.deepEqual(await closePoll(context, command), { handled: true });
+    assert.equal(prompts[0].purpose, 'official.poll-assistant.close.confirm.v1');
+    assert.equal(prompts[0].options[0].id, 'confirm');
+    assert.equal(db.get('SELECT status FROM poll_rounds WHERE id = ?', 'fixture-round').status, 'open');
+
+    const prior = getPollAggregate(db, 'fixture-poll').poll.definition;
+    createPoll(db, { definition: { ...prior, id: 'second-poll', question: 'Outra pergunta?' },
+      scopeId: 'fixture-scope', chatId: 'fixture@g.us', creatorIdentityId: 'fixture-actor',
+      creatorWid: 'fixture@c.us', creatorLabel: 'Fixture actor', roundId: 'second-round',
+      publishIdempotencyKey: 'second-publish', maxActivePollsPerChat: 10, createdAt: timestamp });
+    db.run("UPDATE poll_rounds SET status = 'open', closes_at = '2030-01-01T00:00:00.000Z' WHERE id = 'second-round'");
+    assert.deepEqual(await closePoll(context, { ...command, message: { ...command.message, id: 'close-many' } }), { handled: true });
+    assert.equal(prompts[1].purpose, 'official.poll-assistant.close.select.v1');
+    assert.deepEqual(prompts[1].options.map(option => option.id).sort(), ['fixture-poll', 'second-poll']);
+    assert.equal(db.get('SELECT status FROM poll_rounds WHERE id = ?', 'second-round').status, 'open');
+  } finally { db.close(); }
+});
+
+test('publication sends one durable introduction before the native poll across retries', async () => {
+  const db = open(':memory:'); migrate(db, migrations);
+  try {
+    const aggregate = seed(db);
+    const calls = [];
+    let publishAttempts = 0;
+    const ctx = { pluginId: plugin.manifest.pluginId, databases: { open: () => db },
+      configFor: async () => ({}),
+      i18n: { translatorForScope: async () => t, resolveScopeLocale: async () => ({ locale: 'pt-PT' }) },
+      resolveIdentityAddress: async wid => ({ identityId: wid, canonicalWid: wid, deliveryChatId: wid }),
+      resolveStableIdentityById: async identityId => ({ identityId, canonicalWid: '351900000001@c.us', mentionWid: '351900000001@c.us', deliveryChatId: '351900000001@c.us' }),
+      getAuthoritativeGroupParticipantSnapshot: async () => ({ providerId: 'whatsmeow', observedAt: new Date(timestamp),
+        botWid: 'bot@c.us', participants: [{ wid: 'fixture@c.us', displayName: 'Fixture actor' }] }),
+      sendText: async (_chatId, _text, options) => { calls.push(['introduction', options.idempotencyKey]);
+        return { messageId: 'intro-message' }; },
+      services: { call: async request => {
+        if (request.method === 'reconcilePoll') return { status: 'absent' };
+        calls.push(['poll', request.input.idempotencyKey]);
+        publishAttempts += 1;
+        if (publishAttempts === 1) throw new TransportProviderUnavailableError('whatsmeow', 'offline');
+        return { messageId: 'native-poll', acceptedAt: timestamp };
+      } },
+      enqueuePluginJob: async () => undefined };
+    await publishPollRound(ctx, aggregate.poll.id, aggregate.rounds[0].id, () => new Date(timestamp));
+    assert.equal(getPollDelivery(db, 'poll-announcement:fixture-round:published')?.status, 'sent',
+      JSON.stringify({ round: db.get('SELECT status, last_error, publication_next_attempt_at FROM poll_rounds WHERE id = ?', 'fixture-round'), calls }));
+    const next = db.get('SELECT publication_next_attempt_at FROM poll_rounds WHERE id = ?', 'fixture-round').publication_next_attempt_at;
+    await publishPollRound(ctx, aggregate.poll.id, aggregate.rounds[0].id, () => new Date(next));
+    assert.deepEqual(calls.map(([kind]) => kind), ['introduction', 'poll', 'poll']);
+    assert.equal(getPollAggregate(db, aggregate.poll.id).rounds[0].pollWaMessageId, 'native-poll');
+  } finally { db.close(); }
+});
 
 test('data version 7 retains old deliveries and identifiers, then reloads frozen new writes after restart', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'wabs-poll-fixture-'));

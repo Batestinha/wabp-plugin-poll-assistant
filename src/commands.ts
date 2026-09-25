@@ -75,6 +75,9 @@ export const POLL_ASSISTANT_COMMAND_PERMISSIONS = {
 
 const POLL_LIST_LIMIT = 50;
 const completionRegistrations = new WeakMap<FlowEngine, Set<string>>();
+const POLL_CLOSE_SELECT_PURPOSE = 'official.poll-assistant.close.select.v1';
+const POLL_CLOSE_CONFIRM_PURPOSE = 'official.poll-assistant.close.confirm.v1';
+const closePromptRegistrations = new WeakSet<FlowEngine>();
 export const POLL_CREATION_CANCELLATION_WORKFLOW_ID = 'poll-assistant-create';
 
 interface PollCreationFlowMessenger {
@@ -143,6 +146,7 @@ type PollCreationCompletionDecision = z.infer<typeof pollCreationCompletionDecis
 export function registerPollAssistantCommands(context: PluginCommandContext): void {
   requireOfficialCommandRuntime(context);
   registerPollOutcomeApprovals(context.flowEngine);
+  registerPollClosePrompts(context);
   context.flowEngine.registerAssistantCommandVerification?.('poll.*', async (owner, sessions) => {
     const session = sessions.find((session) => isPollCreationFlowType(session.flowType));
     if (!session || session.status !== 'COMPLETED') return undefined;
@@ -150,7 +154,7 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
     const recipe = snapshot ? pollCreationRecipeFromSnapshot(snapshot) : undefined;
     if (!recipe) return undefined;
     const aggregate = getPollAggregate(pollsDatabase(context.databases), recipe.pollId);
-    const t = await context.i18n.translatorForIdentity(owner.actorIdentityId, owner.scopeId);
+    const t = await context.i18n.translatorForScope(owner.scopeId);
     if (!aggregate) return { status: 'blocked', reason: t('official.poll-assistant.flowInvalid'), retryable: false };
     const round = aggregate.rounds[0]!;
     return round.publishedAt && round.pollWaMessageId
@@ -169,7 +173,7 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
     const preset = resolvePollCreationPreset(config, requestedPresetId);
     if (preset.kind === 'not_found') throw new Error('Poll preset is unavailable');
     const preferences = flowPreferences(config, preset.preset);
-    const locale = await context.i18n.resolveLocale({ message: assistant.message, actor: assistant.actor, scopeId: assistant.scopeId });
+    const locale = await context.i18n.resolveScopeLocale(assistant.scopeId);
     const t = context.i18n.translator(locale.locale, locale.languagePackScopes);
     const initialData = pollCreationPresetInitialData(preset.preset);
     const definition = createPollCreationFlowDefinition({ t, locale: locale.locale, preferences, initialData, flowInstanceId: 'preview' });
@@ -215,6 +219,7 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
 
   context.router.register('poll', 'close', pollCommand({
     dangerous: true,
+    rateLimitExempt: true,
     auditAction: 'poll-assistant.close',
     usage: '/poll close <poll ID> --confirm',
     descriptionKey: 'official.poll-assistant.help.close',
@@ -799,12 +804,28 @@ async function pollStatus(context: PluginCommandContext, ctx: CommandContext) {
   };
 }
 
-async function closePoll(context: PluginCommandContext, ctx: CommandContext) {
+export async function closePoll(context: PluginCommandContext, ctx: CommandContext) {
   const runtime = requireOfficialCommandRuntime(context);
   const args = commandArgs(ctx);
-  const selection = await selectManageablePoll(context, runtime, ctx, isManuallyClosablePoll);
+  const selection = await selectManageablePoll(context, runtime, ctx, isManuallyClosablePoll, true);
+  if (selection.kind === 'choose') {
+    await context.flowEngine.promptChoice({
+      purpose: POLL_CLOSE_SELECT_PURPOSE, subjectType: 'PollCloseSelection',
+      subjectId: JSON.stringify({ scopeId: requireScopeId(ctx), groupWid: currentGroupWid(ctx), requestId: ctx.message.id }),
+      question: ctx.t('official.poll-assistant.close.selectQuestion'),
+      options: selection.candidates.map((aggregate) => ({ id: aggregate.poll.id, label: aggregate.poll.definition.question })),
+      recipientWids: [ctx.message.chatId], eligibleVoterIdentityIds: [ctx.actor!.identityAddress.identityId],
+      presentation: 'text', expiresAt: new Date(Date.now() + 10 * 60_000), expirationNoticeText: false,
+      questionSendOptions: { idempotencyKey: `poll-assistant:close:select:${ctx.message.id}` }, t: ctx.t
+    });
+    return { handled: true };
+  }
   if (selection.kind !== 'selected') return { handled: true, text: selection.text };
-  if (!args.includes('--confirm')) return confirmationReply(ctx, 'close', selection.aggregate);
+  if (!args.includes('--confirm')) {
+    await promptPollCloseConfirmation(context, selection.aggregate, ctx.actor!.identityAddress.identityId,
+      ctx.message.chatId, `command:${ctx.message.id}`);
+    return { handled: true };
+  }
   const aggregate = getPollAggregate(
     pollsDatabase(runtime.databases),
     selection.aggregate.poll.id
@@ -824,10 +845,72 @@ async function closePoll(context: PluginCommandContext, ctx: CommandContext) {
   if (close.kind === 'not_open') {
     return { handled: true, text: ctx.t('official.poll-assistant.close.notOpen') };
   }
-  return {
-    handled: true,
-    text: ctx.t('official.poll-assistant.close.queued', { pollId: aggregate.poll.id })
-  };
+  return { handled: true };
+}
+
+function registerPollClosePrompts(context: PluginCommandContext): void {
+  const engine = context.flowEngine;
+  if (closePromptRegistrations.has(engine)) return;
+  engine.registerPromptHandler(POLL_CLOSE_SELECT_PURPOSE, async (lock) => {
+    if (!lock.subjectId || lock.selectedOptions.length !== 1) return false;
+    const subject = z.object({ scopeId: z.string(), groupWid: z.string(), requestId: z.string() })
+      .safeParse(parsePromptSubject(lock.subjectId));
+    if (!subject.success) return false;
+    const pollId = lock.selectedOptions[0]!.id;
+    const aggregate = getPollAggregate(pollsDatabase(context.databases), pollId);
+    if (!aggregate || aggregate.poll.scopeId !== subject.data.scopeId || aggregate.poll.chatId !== subject.data.groupWid
+      || !isManuallyClosablePoll(aggregate) || !await canManagePollIdentity(context, lock.voterIdentityId, aggregate.poll)) {
+      await engine.acknowledgePromptLock(lock.flowPromptId);
+      return true;
+    }
+    await promptPollCloseConfirmation(context, aggregate, lock.voterIdentityId, aggregate.poll.chatId, subject.data.requestId);
+    await engine.acknowledgePromptLock(lock.flowPromptId);
+    return true;
+  }, { recoverLocked: true });
+  engine.registerPromptHandler(POLL_CLOSE_CONFIRM_PURPOSE, async (lock) => {
+    if (!lock.subjectId || lock.selectedOptions.length !== 1) return false;
+    const subject = z.object({ scopeId: z.string(), groupWid: z.string(), pollId: z.string(), actorIdentityId: z.string() })
+      .safeParse(parsePromptSubject(lock.subjectId));
+    if (!subject.success || lock.voterIdentityId !== subject.data.actorIdentityId) return false;
+    if (lock.selectedOptions[0]!.id === 'confirm') {
+      const aggregate = getPollAggregate(pollsDatabase(context.databases), subject.data.pollId);
+      if (aggregate && aggregate.poll.scopeId === subject.data.scopeId && aggregate.poll.chatId === subject.data.groupWid
+        && isManuallyClosablePoll(aggregate) && await canManagePollIdentity(context, lock.voterIdentityId, aggregate.poll)) {
+        await requestPollClose({ context, databases: context.databases, aggregate });
+      }
+    }
+    await engine.acknowledgePromptLock(lock.flowPromptId);
+    return true;
+  }, { recoverLocked: true });
+  closePromptRegistrations.add(engine);
+}
+
+function parsePromptSubject(value: string): unknown {
+  try { return JSON.parse(value); } catch { return undefined; }
+}
+
+async function canManagePollIdentity(context: PluginCommandContext, identityId: string, poll: StoredPoll): Promise<boolean> {
+  const identityAddress = await context.resolveStableIdentityById?.(identityId);
+  if (!identityAddress) return false;
+  return actorCanManagePoll({ context, actor: {
+    wid: identityAddress.canonicalWid, identityAddress, fromMe: false
+  }, poll });
+}
+
+async function promptPollCloseConfirmation(context: PluginCommandContext, aggregate: StoredPollAggregate,
+  actorIdentityId: string, chatId: string, requestId: string): Promise<void> {
+  const t = await context.i18n.translatorForScope(aggregate.poll.scopeId);
+  await context.flowEngine.promptChoice({
+    purpose: POLL_CLOSE_CONFIRM_PURPOSE, subjectType: 'PollClose',
+    subjectId: JSON.stringify({ scopeId: aggregate.poll.scopeId, groupWid: aggregate.poll.chatId,
+      pollId: aggregate.poll.id, actorIdentityId }),
+    question: t('official.poll-assistant.close.confirmQuestion', { question: aggregate.poll.definition.question }),
+    options: [{ id: 'confirm', label: t('official.poll-assistant.close.confirm') },
+      { id: 'cancel', label: t('official.poll-assistant.close.cancel') }],
+    recipientWids: [chatId], eligibleVoterIdentityIds: [actorIdentityId],
+    presentation: 'text', expiresAt: new Date(Date.now() + 10 * 60_000), expirationNoticeText: false,
+    questionSendOptions: { idempotencyKey: `poll-assistant:close:confirm:${requestId}:${aggregate.poll.id}` }, t
+  });
 }
 
 function isManuallyClosablePoll(aggregate: StoredPollAggregate): boolean {
@@ -847,7 +930,12 @@ async function openPoll(context: PluginCommandContext, ctx: CommandContext) {
     ctx,
     isScheduleDeferredPoll
   );
-  if (selection.kind !== 'selected') return { handled: true, text: selection.text };
+  if (selection.kind === 'reply') return { handled: true, text: selection.text };
+  if (selection.kind === 'choose') return { handled: true, text: ctx.t('official.poll-assistant.manage.choose', {
+    polls: selection.candidates.map((aggregate) => ctx.t('official.poll-assistant.manage.choice', {
+      question: aggregate.poll.definition.question, pollId: aggregate.poll.id
+    })).join('\n')
+  }) };
   if (!args.includes('--confirm')) return confirmationReply(ctx, 'open', selection.aggregate);
   const actorIdentityId = ctx.actor?.identityAddress.identityId;
   const aggregate = getPollAggregate(
@@ -918,13 +1006,15 @@ function isScheduleDeferredPoll(aggregate: StoredPollAggregate): boolean {
 
 type ManageablePollSelection =
   | { kind: 'selected'; aggregate: StoredPollAggregate }
+  | { kind: 'choose'; candidates: StoredPollAggregate[] }
   | { kind: 'reply'; text: string };
 
 async function selectManageablePoll(
   context: PluginCommandContext,
   runtime: OfficialPluginCommandRuntime,
   ctx: CommandContext,
-  stateFilter: (aggregate: StoredPollAggregate) => boolean
+  stateFilter: (aggregate: StoredPollAggregate) => boolean,
+  guidedSelection = false
 ): Promise<ManageablePollSelection> {
   const groupWid = currentGroupWid(ctx);
   if (!groupWid) {
@@ -966,6 +1056,7 @@ async function selectManageablePoll(
       text: ctx.t('official.poll-assistant.manage.none', { target: target || '—' })
     };
   }
+  if (guidedSelection) return { kind: 'choose', candidates };
   return {
     kind: 'reply',
     text: ctx.t('official.poll-assistant.manage.choose', {
@@ -1247,6 +1338,7 @@ function pollCommand(input: {
   allowCurrentManagedGroupMemberConfigPath?: string | undefined;
   requiredBotCapabilities?: string[] | undefined;
   dangerous?: boolean | undefined;
+  rateLimitExempt?: boolean | undefined;
   auditAction: string;
   usage: string;
   descriptionKey: string;
@@ -1270,6 +1362,7 @@ function pollCommand(input: {
     mutation: input.mutation ?? 'durable',
     auditAction: input.auditAction,
     ...(input.dangerous !== undefined ? { dangerous: input.dangerous } : {}),
+    ...(input.rateLimitExempt ? { rateLimitExempt: true } : {}),
     assistant: {
       intentTags: ['poll', input.topicId],
       examples: [input.usage],
@@ -1288,7 +1381,7 @@ function pollCommand(input: {
   };
 }
 
-function flowPreferences(
+export function flowPreferences(
   config: PollAssistantConfig,
   preset?: PollCreationPreset | undefined
 ): PollCreationFlowPreferences {
@@ -1340,7 +1433,7 @@ function flowPreferences(
   };
 }
 
-function resolvePollCreationPreset(
+export function resolvePollCreationPreset(
   config: PollAssistantConfig,
   requestedPresetId: string | undefined
 ): { kind: 'found'; preset?: PollCreationPreset | undefined }
