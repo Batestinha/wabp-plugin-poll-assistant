@@ -61,12 +61,32 @@ const QUORUM_MODE_OPTIONS = [
   { value: 'percentage', label: 'Electorate percentage' }
 ];
 
+const TEMPLATE_DESCRIPTIONS: Record<PollTemplateKind, string> = {
+  publication: 'Group introduction sent before the native poll. It explains the question, choices, voting rules, and ballot delivery.',
+  publicationOption: 'Formats one choice in the group introduction sent before the native poll.',
+  proposalOption: 'Formats one choice in the private approval proposal from the natural-language assistant.',
+  assistantProposal: 'Full private approval summary for a natural-language poll request. The rendered text is saved with the approval and shows every resolved setting.',
+  activation: 'Separate group notice when the first response starts a poll closing timer. Sent only when Announce activation is enabled.',
+  closedPublication: 'Replacement text for the original group introduction after closing. Used only when Edit publication when the poll closes is enabled and WhatsApp still allows the edit.',
+  result: 'Final result message sent to the group after authoritative vote readback. Includes the outcome and the formatted result rows.',
+  resultOption: 'Formats one choice in the final result message, including its count, percentages, and voter names when disclosure is named.',
+  selected: 'Outcome line in the final result when a decision poll selects its winner without a random draw.',
+  selectedByRandomDraw: 'Outcome line in the final result when the configured random tie-break selects a winner.',
+  tie: 'Outcome line in the result when a decision poll has a tie that still needs resolution.',
+  noDecision: 'Outcome line in the final result when a decision poll closes without a selected winner.',
+  quorumNotMet: 'Outcome line in the final result when the poll does not reach its minimum turnout.',
+  measuredDistribution: 'Outcome line in the final result for a response-distribution measurement poll.',
+  measuredScale: 'Outcome line in the final result for an ordered-scale measurement poll, including median and mode.',
+  counted: 'Outcome line in the final result for a count poll, including the summed total and unit.',
+  tieResolved: 'Separate group notice sent after an authorized person resolves a tied decision poll.'
+};
+
 export const pollAssistantControls: ControlDescriptor[] = [
   control('pinActivePolls', 'Pin active polls', 'Pin group polls while voting is open and unpin them when voting closes. Private ballots use the group publication. Turning this off also removes pins managed by this plugin.', 330, { type: 'boolean' }, { widget: 'toggle' }, 'Publishing and voting'),
   control('editPublicationOnClose', 'Edit publication when the poll closes', 'Replace the original publication text using the template below. WhatsApp only permits edits within 15 minutes of sending; older publications stay unchanged and results are still sent normally.', 405, { type: 'boolean' }, { widget: 'toggle' }, 'Closing and results'),
   ...Object.entries(pollTemplateDefinitions).map(([kind, definition], index) => control(
     `messages.${kind}`, definition.title,
-    'Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.',
+    TEMPLATE_DESCRIPTIONS[kind as PollTemplateKind],
     kind === 'proposalOption' ? 190 : kind === 'assistantProposal' ? 200
       : ['publication', 'publicationOption', 'activation'].includes(kind) ? 340 + index
         : kind === 'closedPublication' ? 410 : kind === 'tieResolved' ? 420 : 450 + index,

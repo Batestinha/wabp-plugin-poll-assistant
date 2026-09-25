@@ -300,9 +300,10 @@ test('the archive retains every SQL migration and all declared translations and 
   assert.equal(typeof plugin.lifecycle.onUpdate, 'function');
   assert.ok(metadata.operatorConsole.controls.length > 20);
   const runtimeControls = require('../dist/controls').pollAssistantControls;
-  assert.deepEqual(metadata.operatorConsole.controls.map(({ path, label, section, order, ui }) =>
-    ({ path, label, section, order, builderId: ui.builderId ?? null })),
+  assert.deepEqual(metadata.operatorConsole.controls.map(({ path, label, description, section, order, ui }) =>
+    ({ path, label, description, helpText: ui.helpText, section, order, builderId: ui.builderId ?? null })),
   runtimeControls.map((control) => ({ path: control.storage.path, label: control.label,
+    description: control.description, helpText: control.ui.helpText,
     section: control.section, order: control.order, builderId: control.ui.builderId ?? null })));
 });
 

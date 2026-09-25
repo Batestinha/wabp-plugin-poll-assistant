@@ -4,7 +4,7 @@
   "name": "Poll Assistant",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "kind": "managed_group",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "coreApiRange": "^0.3.10",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
@@ -411,7 +411,7 @@
         "path": "messages.publication",
         "id": "plugin.official.poll-assistant.messages.publication",
         "label": "Publication",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Group introduction sent before the native poll. It explains the question, choices, voting rules, and ballot delivery.",
         "section": "Publishing and voting",
         "order": 340,
         "schema": {
@@ -419,7 +419,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Group introduction sent before the native poll. It explains the question, choices, voting rules, and ballot delivery.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -870,7 +870,7 @@
         "path": "messages.closedPublication",
         "id": "plugin.official.poll-assistant.messages.closedPublication",
         "label": "Closed publication",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Replacement text for the original group introduction after closing. Used only when Edit publication when the poll closes is enabled and WhatsApp still allows the edit.",
         "section": "Closing",
         "order": 410,
         "schema": {
@@ -878,7 +878,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Replacement text for the original group introduction after closing. Used only when Edit publication when the poll closes is enabled and WhatsApp still allows the edit.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -1371,7 +1371,7 @@
         "path": "messages.publicationOption",
         "id": "plugin.official.poll-assistant.messages.publicationOption",
         "label": "Publication option row",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Formats one choice in the group introduction sent before the native poll.",
         "section": "Publishing and voting",
         "order": 342,
         "schema": {
@@ -1379,7 +1379,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Formats one choice in the group introduction sent before the native poll.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -1478,7 +1478,7 @@
         "path": "messages.proposalOption",
         "id": "plugin.official.poll-assistant.messages.proposalOption",
         "label": "Assistant proposal option row",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Formats one choice in the private approval proposal from the natural-language assistant.",
         "section": "Creation",
         "order": 190,
         "schema": {
@@ -1486,7 +1486,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Formats one choice in the private approval proposal from the natural-language assistant.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -1599,7 +1599,7 @@
         "path": "messages.assistantProposal",
         "id": "plugin.official.poll-assistant.messages.assistantProposal",
         "label": "Assistant proposal summary",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Full private approval summary for a natural-language poll request. The rendered text is saved with the approval and shows every resolved setting.",
         "section": "Creation",
         "order": 200,
         "schema": {
@@ -1607,7 +1607,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Full private approval summary for a natural-language poll request. The rendered text is saved with the approval and shows every resolved setting.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -1930,7 +1930,7 @@
         "path": "messages.activation",
         "id": "plugin.official.poll-assistant.messages.activation",
         "label": "Activation notice",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Separate group notice when the first response starts a poll closing timer. Sent only when Announce activation is enabled.",
         "section": "Publishing and voting",
         "order": 345,
         "schema": {
@@ -1938,7 +1938,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Separate group notice when the first response starts a poll closing timer. Sent only when Announce activation is enabled.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -2077,7 +2077,7 @@
         "path": "messages.result",
         "id": "plugin.official.poll-assistant.messages.result",
         "label": "Result",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Final result message sent to the group after authoritative vote readback. Includes the outcome and the formatted result rows.",
         "section": "Results",
         "order": 456,
         "schema": {
@@ -2085,7 +2085,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Final result message sent to the group after authoritative vote readback. Includes the outcome and the formatted result rows.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -2272,7 +2272,7 @@
         "path": "messages.resultOption",
         "id": "plugin.official.poll-assistant.messages.resultOption",
         "label": "Result option row",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Formats one choice in the final result message, including its count, percentages, and voter names when disclosure is named.",
         "section": "Results",
         "order": 457,
         "schema": {
@@ -2280,7 +2280,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Formats one choice in the final result message, including its count, percentages, and voter names when disclosure is named.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -2427,7 +2427,7 @@
         "path": "messages.selected",
         "id": "plugin.official.poll-assistant.messages.selected",
         "label": "Selection wording",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Outcome line in the final result when a decision poll selects its winner without a random draw.",
         "section": "Results",
         "order": 458,
         "schema": {
@@ -2435,7 +2435,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Outcome line in the final result when a decision poll selects its winner without a random draw.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -2662,7 +2662,7 @@
         "path": "messages.selectedByRandomDraw",
         "id": "plugin.official.poll-assistant.messages.selectedByRandomDraw",
         "label": "Random draw wording",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Outcome line in the final result when the configured random tie-break selects a winner.",
         "section": "Results",
         "order": 459,
         "schema": {
@@ -2670,7 +2670,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Outcome line in the final result when the configured random tie-break selects a winner.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -2897,7 +2897,7 @@
         "path": "messages.tie",
         "id": "plugin.official.poll-assistant.messages.tie",
         "label": "Tie wording",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Outcome line in the result when a decision poll has a tie that still needs resolution.",
         "section": "Results",
         "order": 460,
         "schema": {
@@ -2905,7 +2905,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Outcome line in the result when a decision poll has a tie that still needs resolution.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -3132,7 +3132,7 @@
         "path": "messages.noDecision",
         "id": "plugin.official.poll-assistant.messages.noDecision",
         "label": "No decision wording",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Outcome line in the final result when a decision poll closes without a selected winner.",
         "section": "Results",
         "order": 461,
         "schema": {
@@ -3140,7 +3140,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Outcome line in the final result when a decision poll closes without a selected winner.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -3367,7 +3367,7 @@
         "path": "messages.quorumNotMet",
         "id": "plugin.official.poll-assistant.messages.quorumNotMet",
         "label": "Insufficient turnout wording",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Outcome line in the final result when the poll does not reach its minimum turnout.",
         "section": "Results",
         "order": 462,
         "schema": {
@@ -3375,7 +3375,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Outcome line in the final result when the poll does not reach its minimum turnout.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -3602,7 +3602,7 @@
         "path": "messages.measuredDistribution",
         "id": "plugin.official.poll-assistant.messages.measuredDistribution",
         "label": "Distribution wording",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Outcome line in the final result for a response-distribution measurement poll.",
         "section": "Results",
         "order": 463,
         "schema": {
@@ -3610,7 +3610,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Outcome line in the final result for a response-distribution measurement poll.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -3837,7 +3837,7 @@
         "path": "messages.measuredScale",
         "id": "plugin.official.poll-assistant.messages.measuredScale",
         "label": "Scale wording",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Outcome line in the final result for an ordered-scale measurement poll, including median and mode.",
         "section": "Results",
         "order": 464,
         "schema": {
@@ -3845,7 +3845,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Outcome line in the final result for an ordered-scale measurement poll, including median and mode.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -4072,7 +4072,7 @@
         "path": "messages.counted",
         "id": "plugin.official.poll-assistant.messages.counted",
         "label": "Count wording",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Outcome line in the final result for a count poll, including the summed total and unit.",
         "section": "Results",
         "order": 465,
         "schema": {
@@ -4080,7 +4080,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Outcome line in the final result for a count poll, including the summed total and unit.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
@@ -4307,7 +4307,7 @@
         "path": "messages.tieResolved",
         "id": "plugin.official.poll-assistant.messages.tieResolved",
         "label": "Tie resolution notice",
-        "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+        "description": "Separate group notice sent after an authorized person resolves a tied decision poll.",
         "section": "Closing",
         "order": 420,
         "schema": {
@@ -4315,7 +4315,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
+          "helpText": "Separate group notice sent after an authorized person resolves a tied decision poll.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",
