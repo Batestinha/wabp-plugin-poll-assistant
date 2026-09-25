@@ -4,7 +4,7 @@
   "name": "Poll Assistant",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "kind": "managed_group",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "coreApiRange": "^0.3.10",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
@@ -348,8 +348,8 @@
         "id": "plugin.official.poll-assistant.pinActivePolls",
         "label": "Pin active polls",
         "description": "Pin group polls while voting is open and unpin them when voting closes. Private ballots use the group publication. Turning this off also removes pins managed by this plugin.",
-        "section": "Poll Assistant",
-        "order": 45,
+        "section": "Publishing and voting",
+        "order": 330,
         "schema": {
           "type": "boolean"
         },
@@ -380,8 +380,8 @@
         "id": "plugin.official.poll-assistant.editPublicationOnClose",
         "label": "Edit publication when the poll closes",
         "description": "Replace the original publication text using the template below. WhatsApp only permits edits within 15 minutes of sending; older publications stay unchanged and results are still sent normally.",
-        "section": "After closing",
-        "order": 490,
+        "section": "Closing and results",
+        "order": 405,
         "schema": {
           "type": "boolean"
         },
@@ -412,8 +412,8 @@
         "id": "plugin.official.poll-assistant.messages.publication",
         "label": "Publication",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 500,
+        "section": "Publishing and voting",
+        "order": 340,
         "schema": {
           "type": "string",
           "max": 14000
@@ -871,8 +871,8 @@
         "id": "plugin.official.poll-assistant.messages.closedPublication",
         "label": "Closed publication",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "After closing",
-        "order": 501,
+        "section": "Closing",
+        "order": 410,
         "schema": {
           "type": "string",
           "max": 14000
@@ -1372,8 +1372,8 @@
         "id": "plugin.official.poll-assistant.messages.publicationOption",
         "label": "Publication option row",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 502,
+        "section": "Publishing and voting",
+        "order": 342,
         "schema": {
           "type": "string",
           "max": 14000
@@ -1479,8 +1479,8 @@
         "id": "plugin.official.poll-assistant.messages.proposalOption",
         "label": "Assistant proposal option row",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 503,
+        "section": "Creation",
+        "order": 190,
         "schema": {
           "type": "string",
           "max": 14000
@@ -1600,8 +1600,8 @@
         "id": "plugin.official.poll-assistant.messages.assistantProposal",
         "label": "Assistant proposal summary",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 504,
+        "section": "Creation",
+        "order": 200,
         "schema": {
           "type": "string",
           "max": 14000
@@ -1931,8 +1931,8 @@
         "id": "plugin.official.poll-assistant.messages.activation",
         "label": "Activation notice",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 505,
+        "section": "Publishing and voting",
+        "order": 345,
         "schema": {
           "type": "string",
           "max": 14000
@@ -2078,8 +2078,8 @@
         "id": "plugin.official.poll-assistant.messages.result",
         "label": "Result",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 506,
+        "section": "Results",
+        "order": 456,
         "schema": {
           "type": "string",
           "max": 14000
@@ -2273,8 +2273,8 @@
         "id": "plugin.official.poll-assistant.messages.resultOption",
         "label": "Result option row",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 507,
+        "section": "Results",
+        "order": 457,
         "schema": {
           "type": "string",
           "max": 14000
@@ -2428,8 +2428,8 @@
         "id": "plugin.official.poll-assistant.messages.selected",
         "label": "Selection wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 508,
+        "section": "Results",
+        "order": 458,
         "schema": {
           "type": "string",
           "max": 14000
@@ -2663,8 +2663,8 @@
         "id": "plugin.official.poll-assistant.messages.selectedByRandomDraw",
         "label": "Random draw wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 509,
+        "section": "Results",
+        "order": 459,
         "schema": {
           "type": "string",
           "max": 14000
@@ -2898,8 +2898,8 @@
         "id": "plugin.official.poll-assistant.messages.tie",
         "label": "Tie wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 510,
+        "section": "Results",
+        "order": 460,
         "schema": {
           "type": "string",
           "max": 14000
@@ -3133,8 +3133,8 @@
         "id": "plugin.official.poll-assistant.messages.noDecision",
         "label": "No decision wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 511,
+        "section": "Results",
+        "order": 461,
         "schema": {
           "type": "string",
           "max": 14000
@@ -3368,8 +3368,8 @@
         "id": "plugin.official.poll-assistant.messages.quorumNotMet",
         "label": "Insufficient turnout wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 512,
+        "section": "Results",
+        "order": 462,
         "schema": {
           "type": "string",
           "max": 14000
@@ -3603,8 +3603,8 @@
         "id": "plugin.official.poll-assistant.messages.measuredDistribution",
         "label": "Distribution wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 513,
+        "section": "Results",
+        "order": 463,
         "schema": {
           "type": "string",
           "max": 14000
@@ -3838,8 +3838,8 @@
         "id": "plugin.official.poll-assistant.messages.measuredScale",
         "label": "Scale wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 514,
+        "section": "Results",
+        "order": 464,
         "schema": {
           "type": "string",
           "max": 14000
@@ -4073,8 +4073,8 @@
         "id": "plugin.official.poll-assistant.messages.counted",
         "label": "Count wording",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 515,
+        "section": "Results",
+        "order": 465,
         "schema": {
           "type": "string",
           "max": 14000
@@ -4308,8 +4308,8 @@
         "id": "plugin.official.poll-assistant.messages.tieResolved",
         "label": "Tie resolution notice",
         "description": "Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.",
-        "section": "Messages",
-        "order": 516,
+        "section": "Closing",
+        "order": 420,
         "schema": {
           "type": "string",
           "max": 14000
@@ -4561,8 +4561,8 @@
         "id": "plugin.official.poll-assistant.messages.activationEnabled",
         "label": "Announce activation",
         "description": "Send a separate closing-time announcement after activation. New announcements are disabled by default.",
-        "section": "Messages",
-        "order": 520,
+        "section": "Publishing and voting",
+        "order": 344,
         "schema": {
           "type": "boolean"
         },
@@ -4593,7 +4593,7 @@
         "id": "plugin.official.poll-assistant.allowCreation",
         "label": "Accept new polls",
         "description": "Allow new Poll Assistant setup flows in this scope; committed poll lifecycles continue until terminal.",
-        "section": "Poll Assistant",
+        "section": "Access",
         "order": 10,
         "schema": {
           "type": "boolean"
@@ -4625,7 +4625,7 @@
         "id": "plugin.official.poll-assistant.allowMemberCreation",
         "label": "Members may create polls",
         "description": "Allow current managed-group members to start polls without a separate polls.create grant.",
-        "section": "Poll Assistant",
+        "section": "Access",
         "order": 20,
         "schema": {
           "type": "boolean"
@@ -4657,8 +4657,8 @@
         "id": "plugin.official.poll-assistant.timezone",
         "label": "Timezone",
         "description": "IANA timezone used to display poll deadlines and results.",
-        "section": "Poll Assistant",
-        "order": 30,
+        "section": "Creation",
+        "order": 100,
         "schema": {
           "type": "string",
           "format": "timezone",
@@ -4690,9 +4690,9 @@
         "path": "creationPresets",
         "id": "plugin.official.poll-assistant.creationPresets",
         "label": "Creation presets",
-        "description": "Configure named poll-creation policies. Fixed fields are supplied by the operator and skipped in chat; suggested fields remain creator-selectable and are shown first.",
-        "section": "Poll Assistant",
-        "order": 40,
+        "description": "Configure named policies for guided /poll setup and natural-language proposals. In chat, fixed fields are skipped and suggested fields are offered first. When a proposal omits a field, its preset operator value is proposed.",
+        "section": "Creation",
+        "order": 180,
         "schema": {
           "type": "array",
           "items": {
@@ -4700,7 +4700,7 @@
           }
         },
         "ui": {
-          "helpText": "Configure named poll-creation policies. Fixed fields are supplied by the operator and skipped in chat; suggested fields remain creator-selectable and are shown first.",
+          "helpText": "Configure named policies for guided /poll setup and natural-language proposals. In chat, fixed fields are skipped and suggested fields are offered first. When a proposal omits a field, its preset operator value is proposed.",
           "widget": "builder",
           "builderId": "official.poll-assistant.creation-presets.v1",
           "builderEndpoints": {
@@ -4730,8 +4730,8 @@
         "id": "plugin.official.poll-assistant.automationWorkingHours.enabled",
         "label": "Enforce automation working hours",
         "description": "Gate automated poll publication and first-response activation to the configured weekly windows. Manual polls are unaffected.",
-        "section": "Poll Assistant",
-        "order": 50,
+        "section": "Automation",
+        "order": 500,
         "schema": {
           "type": "boolean"
         },
@@ -4762,8 +4762,8 @@
         "id": "plugin.official.poll-assistant.automationWorkingHours.windows",
         "label": "Automation working-hours windows",
         "description": "Weekly local-time windows that gate automated poll publication and first-response activation. Multiple and overnight windows are supported.",
-        "section": "Poll Assistant",
-        "order": 60,
+        "section": "Automation",
+        "order": 510,
         "schema": {
           "type": "array",
           "items": {
@@ -4797,9 +4797,9 @@
         "path": "defaultClosingMode",
         "id": "plugin.official.poll-assistant.defaultClosingMode",
         "label": "Default closing mode",
-        "description": "Closing choice shown first in the guided poll setup flow.",
-        "section": "Poll defaults",
-        "order": 100,
+        "description": "Closing choice shown first in guided setup and used for omitted assistant proposal settings when no preset is selected.",
+        "section": "Creation",
+        "order": 110,
         "schema": {
           "type": "enum",
           "enum": [
@@ -4818,7 +4818,7 @@
           ]
         },
         "ui": {
-          "helpText": "Closing choice shown first in the guided poll setup flow.",
+          "helpText": "Closing choice shown first in guided setup and used for omitted assistant proposal settings when no preset is selected.",
           "widget": "segmented",
           "options": [
             {
@@ -4858,8 +4858,8 @@
         "id": "plugin.official.poll-assistant.defaultDeadlineMinutes",
         "label": "Default duration",
         "description": "Default number of minutes a deadline poll remains open after publication.",
-        "section": "Poll defaults",
-        "order": 110,
+        "section": "Creation",
+        "order": 120,
         "schema": {
           "type": "number",
           "unit": "minutes",
@@ -4893,8 +4893,8 @@
         "id": "plugin.official.poll-assistant.maxDeadlineMinutes",
         "label": "Maximum duration",
         "description": "Maximum number of minutes allowed between publication and a configured deadline.",
-        "section": "Poll defaults",
-        "order": 120,
+        "section": "Limits and retention",
+        "order": 620,
         "schema": {
           "type": "number",
           "unit": "minutes",
@@ -4928,7 +4928,7 @@
         "id": "plugin.official.poll-assistant.defaultActivationTimeoutMinutes",
         "label": "Default activation timeout",
         "description": "Minutes after publication before a first-response poll promotes a creator ballot or finalizes with no response.",
-        "section": "Poll defaults",
+        "section": "Creation",
         "order": 130,
         "schema": {
           "type": "number",
@@ -4962,9 +4962,9 @@
         "path": "defaultQuorumMode",
         "id": "plugin.official.poll-assistant.defaultQuorumMode",
         "label": "Default turnout rule",
-        "description": "Minimum-turnout choice shown first in the guided poll setup flow.",
-        "section": "Turnout defaults",
-        "order": 200,
+        "description": "Minimum-turnout choice shown first in guided setup and used for omitted assistant proposal settings when no preset is selected.",
+        "section": "Creation",
+        "order": 140,
         "schema": {
           "type": "enum",
           "enum": [
@@ -4983,7 +4983,7 @@
           ]
         },
         "ui": {
-          "helpText": "Minimum-turnout choice shown first in the guided poll setup flow.",
+          "helpText": "Minimum-turnout choice shown first in guided setup and used for omitted assistant proposal settings when no preset is selected.",
           "widget": "segmented",
           "options": [
             {
@@ -5023,8 +5023,8 @@
         "id": "plugin.official.poll-assistant.defaultAbsoluteQuorumResponses",
         "label": "Default respondent count",
         "description": "Default minimum respondent count when count-based turnout is selected.",
-        "section": "Turnout defaults",
-        "order": 210,
+        "section": "Creation",
+        "order": 150,
         "schema": {
           "type": "number",
           "unit": "items",
@@ -5058,8 +5058,8 @@
         "id": "plugin.official.poll-assistant.defaultPercentageQuorumBasisPoints",
         "label": "Default turnout basis points",
         "description": "Default electorate percentage in basis points when percentage turnout is selected; 5000 means 50%.",
-        "section": "Turnout defaults",
-        "order": 220,
+        "section": "Creation",
+        "order": 160,
         "schema": {
           "type": "number",
           "min": 1,
@@ -5092,8 +5092,8 @@
         "id": "plugin.official.poll-assistant.maxActivePollsPerChat",
         "label": "Active poll limit",
         "description": "Maximum number of active or tie-pending polls allowed in one originating chat.",
-        "section": "Lifecycle limits",
-        "order": 300,
+        "section": "Limits and retention",
+        "order": 600,
         "schema": {
           "type": "number",
           "unit": "items",
@@ -5127,8 +5127,8 @@
         "id": "plugin.official.poll-assistant.ballotRetentionDays",
         "label": "Ballot retention",
         "description": "Days to retain Poll Assistant voter-level working data after terminal delivery. The independent chat archive follows its own retention policy; aggregate results remain stored.",
-        "section": "Lifecycle limits",
-        "order": 310,
+        "section": "Limits and retention",
+        "order": 630,
         "schema": {
           "type": "number",
           "unit": "days",
@@ -5162,8 +5162,8 @@
         "id": "plugin.official.poll-assistant.maxPrivateElectorateSize",
         "label": "Private ballot electorate limit",
         "description": "Maximum eligible voters for a private multi-recipient poll. The platform limit is 250.",
-        "section": "Lifecycle limits",
-        "order": 320,
+        "section": "Limits and retention",
+        "order": 610,
         "schema": {
           "type": "number",
           "unit": "items",
@@ -5197,8 +5197,8 @@
         "id": "plugin.official.poll-assistant.assistantExposeProvisionalResults",
         "label": "Assistant may show live tallies",
         "description": "Allow the natural-language assistant to expose aggregate event-derived tallies for open polls. These results are explicitly provisional; finalized results always use authoritative WhatsApp readback.",
-        "section": "Assistant access",
-        "order": 400,
+        "section": "Access",
+        "order": 30,
         "schema": {
           "type": "boolean"
         },

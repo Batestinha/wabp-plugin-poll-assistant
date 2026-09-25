@@ -66,6 +66,17 @@ test('assistant creation resolves scoped defaults and fixed presets before appro
     defaultQuorumMode: 'absolute', defaultAbsoluteQuorumResponses: 3 }));
   assert.deepEqual(scoped.closing, { kind: 'manual' });
   assert.deepEqual(scoped.quorum, { kind: 'absolute', minimumResponses: 3 });
+  const shared = resolveCreationDefinition(draft, parsePollAssistantConfig({
+    defaultClosingMode: 'manual', defaultQuorumMode: 'none',
+    creationPresets: [{ id: 'shared', label: 'Shared', isDefault: true,
+      closing: { mode: 'ask', kind: 'duration', durationMinutes: 20 },
+      quorum: { mode: 'ask', kind: 'percentage', minimumTurnoutBasisPoints: 6000 },
+      ballotDelivery: { mode: 'ask', value: 'private' },
+      voterDisclosure: { mode: 'ask', value: 'named' } }]
+  }));
+  assert.deepEqual(shared.closing, { kind: 'deadline', deadline: { mode: 'after_publish', durationMinutes: 20 } });
+  assert.deepEqual(shared.quorum, { kind: 'percentage', minimumTurnoutBasisPoints: 6000 });
+  assert.equal(shared.ballotDelivery, 'private');
 });
 
 test('new count polls reject zero while legacy stored zero values remain readable', () => {
@@ -288,6 +299,11 @@ test('the archive retains every SQL migration and all declared translations and 
   for (const key of Object.keys(plugin.manifest.defaultMessages)) assert.ok(pt[key]?.trim(), key);
   assert.equal(typeof plugin.lifecycle.onUpdate, 'function');
   assert.ok(metadata.operatorConsole.controls.length > 20);
+  const runtimeControls = require('../dist/controls').pollAssistantControls;
+  assert.deepEqual(metadata.operatorConsole.controls.map(({ path, label, section, order, ui }) =>
+    ({ path, label, section, order, builderId: ui.builderId ?? null })),
+  runtimeControls.map((control) => ({ path: control.storage.path, label: control.label,
+    section: control.section, order: control.order, builderId: control.ui.builderId ?? null })));
 });
 
 test('publication pages are atomic and retries keep their original text and page-local recipients', () => {

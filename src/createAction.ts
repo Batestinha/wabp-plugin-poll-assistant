@@ -111,7 +111,13 @@ export function resolveCreationDefinition(raw: Record<string, unknown>, config: 
   const selection = resolvePollCreationPreset(config, requestedPresetId);
   if (selection.kind === 'not_found') throw new Error(`Poll creation preset ${selection.presetId} is unavailable`);
   const preset = selection.preset;
-  const preferences = flowPreferences(config, preset);
+  // A guided-flow "ask" field still has an operator value in its preset.
+  // When a natural-language request omits that field, propose that value.
+  const preferences = flowPreferences(config, preset ? {
+    ...preset,
+    closing: { ...preset.closing, mode: 'suggest' },
+    quorum: { ...preset.quorum, mode: 'suggest' }
+  } : undefined);
   const fixed = (field: string, mode: string | undefined, supplied: unknown, value: unknown) => {
     if (mode === 'fixed' && supplied !== undefined && workflowDigest(supplied) !== workflowDigest(value)) {
       throw new Error(`Poll creation preset fixes ${field}`);

@@ -62,12 +62,14 @@ const QUORUM_MODE_OPTIONS = [
 ];
 
 export const pollAssistantControls: ControlDescriptor[] = [
-  control('pinActivePolls', 'Pin active polls', 'Pin group polls while voting is open and unpin them when voting closes. Private ballots use the group publication. Turning this off also removes pins managed by this plugin.', 45, { type: 'boolean' }, { widget: 'toggle' }),
-  control('editPublicationOnClose', 'Edit publication when the poll closes', 'Replace the original publication text using the template below. WhatsApp only permits edits within 15 minutes of sending; older publications stay unchanged and results are still sent normally.', 490, { type: 'boolean' }, { widget: 'toggle' }, 'After closing'),
+  control('pinActivePolls', 'Pin active polls', 'Pin group polls while voting is open and unpin them when voting closes. Private ballots use the group publication. Turning this off also removes pins managed by this plugin.', 330, { type: 'boolean' }, { widget: 'toggle' }, 'Publishing and voting'),
+  control('editPublicationOnClose', 'Edit publication when the poll closes', 'Replace the original publication text using the template below. WhatsApp only permits edits within 15 minutes of sending; older publications stay unchanged and results are still sent normally.', 405, { type: 'boolean' }, { widget: 'toggle' }, 'Closing and results'),
   ...Object.entries(pollTemplateDefinitions).map(([kind, definition], index) => control(
     `messages.${kind}`, definition.title,
     'Edit this message using variables and optional conditions. Leave blank to restore the localized compact default.',
-    500 + index,
+    kind === 'proposalOption' ? 190 : kind === 'assistantProposal' ? 200
+      : ['publication', 'publicationOption', 'activation'].includes(kind) ? 340 + index
+        : kind === 'closedPublication' ? 410 : kind === 'tieResolved' ? 420 : 450 + index,
     { type: 'string', max: POLL_TEMPLATE_MAX_LENGTH },
     {
       widget: 'text', multiline: true,
@@ -78,16 +80,19 @@ export const pollAssistantControls: ControlDescriptor[] = [
       templateDefaultFragment: true,
       placeholder: definition.source
     },
-    kind === 'closedPublication' ? 'After closing' : 'Messages'
+    ['proposalOption', 'assistantProposal'].includes(kind) ? 'Creation'
+      : ['publication', 'publicationOption', 'activation'].includes(kind) ? 'Publishing and voting'
+        : ['closedPublication', 'tieResolved'].includes(kind) ? 'Closing' : 'Results'
   )),
-  control('messages.activationEnabled', 'Announce activation', 'Send a separate closing-time announcement after activation. New announcements are disabled by default.', 520, { type: 'boolean' }, { widget: 'toggle' }, 'Messages'),
+  control('messages.activationEnabled', 'Announce activation', 'Send a separate closing-time announcement after activation. New announcements are disabled by default.', 344, { type: 'boolean' }, { widget: 'toggle' }, 'Publishing and voting'),
   control(
     'allowCreation',
     'Accept new polls',
     'Allow new Poll Assistant setup flows in this scope; committed poll lifecycles continue until terminal.',
     10,
     { type: 'boolean' },
-    { widget: 'toggle' }
+    { widget: 'toggle' },
+    'Access'
   ),
   control(
     'allowMemberCreation',
@@ -95,70 +100,75 @@ export const pollAssistantControls: ControlDescriptor[] = [
     'Allow current managed-group members to start polls without a separate polls.create grant.',
     20,
     { type: 'boolean' },
-    { widget: 'toggle' }
+    { widget: 'toggle' },
+    'Access'
   ),
   control(
     'timezone',
     'Timezone',
     'IANA timezone used to display poll deadlines and results.',
-    30,
+    100,
     { type: 'string', format: 'timezone', required: true },
-    { widget: 'select' }
+    { widget: 'select' },
+    'Creation'
   ),
   control(
     'creationPresets',
     'Creation presets',
-    'Configure named poll-creation policies. Fixed fields are supplied by the operator and skipped in chat; suggested fields remain creator-selectable and are shown first.',
-    40,
+    'Configure named policies for guided /poll setup and natural-language proposals. In chat, fixed fields are skipped and suggested fields are offered first. When a proposal omits a field, its preset operator value is proposed.',
+    180,
     { type: 'array', items: { type: 'object' } },
     {
       widget: 'builder',
       builderId: 'official.poll-assistant.creation-presets.v1',
       builderEndpoints: { actions: '/api/v1/operator-console/workflow-actions' }
-    }
+    },
+    'Creation'
   ),
   control(
     'automationWorkingHours.enabled',
     'Enforce automation working hours',
     'Gate automated poll publication and first-response activation to the configured weekly windows. Manual polls are unaffected.',
-    50,
+    500,
     { type: 'boolean' },
-    { widget: 'toggle' }
+    { widget: 'toggle' },
+    'Automation'
   ),
   control(
     'automationWorkingHours.windows',
     'Automation working-hours windows',
     'Weekly local-time windows that gate automated poll publication and first-response activation. Multiple and overnight windows are supported.',
-    60,
+    510,
     { type: 'array', items: { type: 'object' } },
-    { widget: 'builder', builderId: 'official.poll-assistant.working-hours.v1' }
+    { widget: 'builder', builderId: 'official.poll-assistant.working-hours.v1' },
+    'Automation'
   ),
   control(
     'defaultClosingMode',
     'Default closing mode',
-    'Closing choice shown first in the guided poll setup flow.',
-    100,
+    'Closing choice shown first in guided setup and used for omitted assistant proposal settings when no preset is selected.',
+    110,
     { type: 'enum', enum: CLOSING_MODE_OPTIONS },
     { widget: 'segmented', options: CLOSING_MODE_OPTIONS },
-    'Poll defaults'
+    'Creation'
   ),
   control(
     'defaultDeadlineMinutes',
     'Default duration',
     'Default number of minutes a deadline poll remains open after publication.',
-    110,
+    120,
     { type: 'number', unit: 'minutes', min: 1, max: 44_640 },
     { widget: 'duration' },
-    'Poll defaults'
+    'Creation'
   ),
   control(
     'maxDeadlineMinutes',
     'Maximum duration',
     'Maximum number of minutes allowed between publication and a configured deadline.',
-    120,
+    620,
     { type: 'number', unit: 'minutes', min: 1, max: 44_640 },
     { widget: 'duration' },
-    'Poll defaults'
+    'Limits and retention'
   ),
   control(
     'defaultActivationTimeoutMinutes',
@@ -167,69 +177,69 @@ export const pollAssistantControls: ControlDescriptor[] = [
     130,
     { type: 'number', unit: 'minutes', min: 1, max: 44_640 },
     { widget: 'duration' },
-    'Poll defaults'
+    'Creation'
   ),
   control(
     'defaultQuorumMode',
     'Default turnout rule',
-    'Minimum-turnout choice shown first in the guided poll setup flow.',
-    200,
+    'Minimum-turnout choice shown first in guided setup and used for omitted assistant proposal settings when no preset is selected.',
+    140,
     { type: 'enum', enum: QUORUM_MODE_OPTIONS },
     { widget: 'segmented', options: QUORUM_MODE_OPTIONS },
-    'Turnout defaults'
+    'Creation'
   ),
   control(
     'defaultAbsoluteQuorumResponses',
     'Default respondent count',
     'Default minimum respondent count when count-based turnout is selected.',
-    210,
+    150,
     { type: 'number', unit: 'items', min: 1, max: 100_000 },
     { widget: 'number' },
-    'Turnout defaults'
+    'Creation'
   ),
   control(
     'defaultPercentageQuorumBasisPoints',
     'Default turnout basis points',
     'Default electorate percentage in basis points when percentage turnout is selected; 5000 means 50%.',
-    220,
+    160,
     { type: 'number', min: 1, max: 10_000 },
     { widget: 'number' },
-    'Turnout defaults'
+    'Creation'
   ),
   control(
     'maxActivePollsPerChat',
     'Active poll limit',
     'Maximum number of active or tie-pending polls allowed in one originating chat.',
-    300,
+    600,
     { type: 'number', unit: 'items', min: 1, max: 100 },
     { widget: 'number' },
-    'Lifecycle limits'
+    'Limits and retention'
   ),
   control(
     'ballotRetentionDays',
     'Ballot retention',
     'Days to retain Poll Assistant voter-level working data after terminal delivery. The independent chat archive follows its own retention policy; aggregate results remain stored.',
-    310,
+    630,
     { type: 'number', unit: 'days', min: 1, max: 3_650 },
     { widget: 'duration' },
-    'Lifecycle limits'
+    'Limits and retention'
   ),
   control(
     'maxPrivateElectorateSize',
     'Private ballot electorate limit',
     'Maximum eligible voters for a private multi-recipient poll. The platform limit is 250.',
-    320,
+    610,
     { type: 'number', unit: 'items', min: 1, max: 250 },
     { widget: 'number' },
-    'Lifecycle limits'
+    'Limits and retention'
   ),
   control(
     'assistantExposeProvisionalResults',
     'Assistant may show live tallies',
     'Allow the natural-language assistant to expose aggregate event-derived tallies for open polls. These results are explicitly provisional; finalized results always use authoritative WhatsApp readback.',
-    400,
+    30,
     { type: 'boolean' },
     { widget: 'toggle' },
-    'Assistant access'
+    'Access'
   )
 ];

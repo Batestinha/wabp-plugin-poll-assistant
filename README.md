@@ -35,9 +35,15 @@ control the approval preview produced for new polls. The default summary uses
 bold labels for each resolved setting, and the default option row begins
 `1) - ...`. Existing approval messages retain their saved text and digest.
 
+The operator console groups Poll Assistant settings by poll stage. Creation
+presets are shared by guided `/poll` setup and natural-language proposals. When
+a request omits a setting, its proposal uses the selected preset value,
+including values marked Ask for guided setup. Without a preset, the scoped
+closing and turnout defaults apply.
+
 Poll message lifecycle settings are available in Poll Assistant settings. `Pin active
 polls` pins the native group ballot (or the publication for private ballots) and
-removes the managed pin on closure or when disabled. The `After closing` section
+removes the managed pin on closure or when disabled. The `Closing` section
 optionally edits the original publication with the existing variable, condition,
 and mention editor. The close template exposes every publication field plus close
 time, original publication, and result fields, so a publication template can be
