@@ -50,7 +50,7 @@ export function registerPollCreateAction(context: PluginServiceRegistrationConte
         policy: input.outcome ? current.t(`official.poll-assistant.outcome.policy.${input.outcome.policy}`) : '-' });
       const options = input.definition.options.map((option) => renderPollTemplate({ kind: 'proposalOption', overrides: current.config.messages, t: current.t, values: {
         ordinal: option.ordinal, label: option.label, numericValue: option.numericValue,
-        option: `${option.label}${option.numericValue !== undefined ? ` = ${option.numericValue}` : ''}`
+        option: option.label
       } })).join('\n');
       const proposalText = renderPollTemplate({ kind: 'assistantProposal', overrides: current.config.messages, t: current.t, values: {
         question: input.definition.question, options,

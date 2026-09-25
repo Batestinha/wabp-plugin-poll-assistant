@@ -4,7 +4,7 @@
   "name": "Poll Assistant",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "kind": "managed_group",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "coreApiRange": "^0.3.10",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
@@ -1478,7 +1478,7 @@
         "path": "messages.proposalOption",
         "id": "plugin.official.poll-assistant.messages.proposalOption",
         "label": "Assistant proposal option row",
-        "description": "Formats one choice in the private approval proposal from the natural-language assistant.",
+        "description": "Formats one choice in the natural-language assistant proposal. {option} is the choice label; {numericValue} is available separately for count polls.",
         "section": "Creation",
         "order": 190,
         "schema": {
@@ -1486,7 +1486,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Formats one choice in the private approval proposal from the natural-language assistant.",
+          "helpText": "Formats one choice in the natural-language assistant proposal. {option} is the choice label; {numericValue} is available separately for count polls.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",

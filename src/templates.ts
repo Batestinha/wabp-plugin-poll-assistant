@@ -21,7 +21,7 @@ export const pollTemplateDefinitions = {
     source: 'Poll closed: «{question}»'
   },
   publicationOption: { title: 'Publication option row', tokens: ['ordinal', 'label', 'option'], source: '{ordinal}. {label}' },
-  proposalOption: { title: 'Assistant proposal option row', tokens: ['ordinal', 'label', 'numericValue', 'option'], source: '{ordinal}) - {option}' },
+  proposalOption: { title: 'Assistant proposal option row', tokens: ['ordinal', 'label', 'numericValue', 'option'], source: '{ordinal}) {option}' },
   assistantProposal: {
     title: 'Assistant proposal summary',
     tokens: ['question', 'options', 'purpose', 'rule', 'closing', 'quorum', 'tie', 'electorate', 'delivery', 'disclosure', 'consequences', 'policy'],
