@@ -269,7 +269,16 @@ function ruleLabel(definition: PollDefinition, t: TranslateFn): string {
       : definition.rule.kind === 'approve_reject'
         ? 'approveReject'
         : definition.rule.kind;
-  return t(`official.poll-assistant.flow.rule.${key}`);
+  const label = t(`official.poll-assistant.flow.rule.${key}`);
+  if (definition.rule.kind === 'single_non_transferable' || definition.rule.kind === 'multiwinner_approval') {
+    return t('official.poll-assistant.flow.summary.seats', { rule: label, seats: definition.rule.seats });
+  }
+  if (definition.rule.kind === 'approve_reject') {
+    const basisPoints = definition.rule.minimumApprovalBasisPoints;
+    const threshold = (basisPoints / 100).toFixed(basisPoints % 100 === 0 ? 0 : basisPoints % 10 === 0 ? 1 : 2);
+    return t('official.poll-assistant.flow.summary.threshold', { rule: label, threshold });
+  }
+  return label;
 }
 
 function tiePolicyKey(kind: 'no_decision' | 'authorized_choice' | 'status_quo' | 'random_draw'): string {

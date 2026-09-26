@@ -65,7 +65,7 @@ const TEMPLATE_DESCRIPTIONS: Record<PollTemplateKind, string> = {
   publication: 'Group introduction sent before the native poll. It explains the question, choices, voting rules, and ballot delivery.',
   publicationOption: 'Formats one choice in the group introduction sent before the native poll.',
   proposalOption: 'Formats one choice in the natural-language assistant proposal. {option} is the choice label; {numericValue} is available separately for count polls.',
-  assistantProposal: 'Full private approval summary for a natural-language poll request. The rendered text is saved with the approval and shows every resolved setting.',
+  assistantProposal: 'Approval summary for a natural-language poll request. The localized default shows resolved settings the requester may change and hides fixed preset fields. Use showPurpose, showRule, showClosing, showQuorum, showTie, showDelivery and showDisclosure conditions to preserve that behavior in a custom template.',
   activation: 'Separate group notice when the first response starts a poll closing timer. Sent only when Announce activation is enabled.',
   closedPublication: 'Replacement text for the original group introduction after closing. Used only when Edit publication when the poll closes is enabled and WhatsApp still allows the edit.',
   result: 'Final result message sent to the group after authoritative vote readback. Includes the outcome and the formatted result rows.',

@@ -4,7 +4,7 @@
   "name": "Poll Assistant",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "kind": "managed_group",
-  "version": "0.7.9",
+  "version": "0.7.10",
   "coreApiRange": "^0.3.10",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
@@ -1599,7 +1599,7 @@
         "path": "messages.assistantProposal",
         "id": "plugin.official.poll-assistant.messages.assistantProposal",
         "label": "Assistant proposal summary",
-        "description": "Full private approval summary for a natural-language poll request. The rendered text is saved with the approval and shows every resolved setting.",
+        "description": "Approval summary for a natural-language poll request. The localized default shows resolved settings the requester may change and hides fixed preset fields. Use showPurpose, showRule, showClosing, showQuorum, showTie, showDelivery and showDisclosure conditions to preserve that behavior in a custom template.",
         "section": "Creation",
         "order": 200,
         "schema": {
@@ -1607,7 +1607,7 @@
           "max": 14000
         },
         "ui": {
-          "helpText": "Full private approval summary for a natural-language poll request. The rendered text is saved with the approval and shows every resolved setting.",
+          "helpText": "Approval summary for a natural-language poll request. The localized default shows resolved settings the requester may change and hides fixed preset fields. Use showPurpose, showRule, showClosing, showQuorum, showTie, showDelivery and showDisclosure conditions to preserve that behavior in a custom template.",
           "widget": "text",
           "multiline": true,
           "templateDialect": "conditional-values-v2",

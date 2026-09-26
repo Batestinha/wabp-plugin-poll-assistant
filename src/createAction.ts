@@ -52,11 +52,22 @@ export function registerPollCreateAction(context: PluginServiceRegistrationConte
         ordinal: option.ordinal, label: option.label, numericValue: option.numericValue,
         option: option.label
       } })).join('\n');
+      const presetSelection = resolvePollCreationPreset(current.config, draft.presetId);
+      const preset = presetSelection.kind === 'found' ? presetSelection.preset : undefined;
       const proposalText = renderPollTemplate({ kind: 'assistantProposal', overrides: current.config.messages, t: current.t, values: {
         question: input.definition.question, options,
         ...pollConfigurationValues(input.definition, current.t, current.config.timezone),
         ...(outcome && input.outcome ? { consequences: renderPollOutcomeProgram(outcome, input.definition, current.t),
           policy: current.t(`official.poll-assistant.outcome.policy.${input.outcome.policy}`) } : {})
+      }, conditionValues: {
+        showPurpose: preset?.purpose.mode !== 'fixed',
+        showRule: (input.definition.purpose === 'count' ? preset?.countUnit.mode
+          : input.definition.purpose === 'measure' ? preset?.measureRule.mode : preset?.decideRule.mode) !== 'fixed',
+        showClosing: preset?.closing.mode !== 'fixed',
+        showQuorum: preset?.quorum.mode !== 'fixed',
+        showTie: input.definition.purpose === 'decide' && preset?.tiePolicy.mode !== 'fixed',
+        showDelivery: preset?.ballotDelivery.mode !== 'fixed',
+        showDisclosure: preset?.voterDisclosure.mode !== 'fixed'
       } });
       return { input, summary, proposalText, entries: [
         { title: current.t('official.poll-assistant.outcome.entry.question'), value: input.definition.question },
@@ -199,7 +210,11 @@ async function inspectOperation(context: PluginServiceRegistrationContext, opera
   const aggregate = getPollAggregate(db, row.poll_id)!;
   const round = aggregate.rounds[0]!;
   if (aggregate.poll.status === 'cancelled') return { status: 'blocked', reason: current.t('official.poll-assistant.outcome.status.cancelled'), retryable: false };
-  return round.pollWaMessageId && round.publishedAt
-    ? { status: 'completed', output: { pollId: aggregate.poll.id, roundId: round.id, messageId: round.pollWaMessageId }, summary: current.t('official.poll-assistant.outcome.created', { question: aggregate.poll.definition.question, pollId: aggregate.poll.id }) }
+  // Private ballots have individual message IDs, not a group poll message ID.
+  const published = Boolean(round.publishedAt && (round.pollWaMessageId || aggregate.poll.definition.ballotDelivery === 'private'));
+  return published
+    ? { status: 'completed', output: { pollId: aggregate.poll.id, roundId: round.id,
+      ...(round.pollWaMessageId ? { messageId: round.pollWaMessageId } : {}) },
+      summary: current.t('official.poll-assistant.outcome.created', { question: aggregate.poll.definition.question, pollId: aggregate.poll.id }) }
     : { status: 'pending', operationId, summary: current.t('official.poll-assistant.outcome.publicationPending') };
 }

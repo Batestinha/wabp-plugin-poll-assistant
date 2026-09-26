@@ -24,8 +24,9 @@ export const pollTemplateDefinitions = {
   proposalOption: { title: 'Assistant proposal option row', tokens: ['ordinal', 'label', 'numericValue', 'option'], source: '*{ordinal}*) {option}' },
   assistantProposal: {
     title: 'Assistant proposal summary',
-    tokens: ['question', 'options', 'purpose', 'rule', 'closing', 'quorum', 'tie', 'electorate', 'delivery', 'disclosure', 'consequences', 'policy'],
-    source: '*Question*\n{question}\n\n*Options*\n{options}\n\n*Purpose*: {purpose}\n*Rule*: {rule}\n*Closing*: {closing}\n*Quorum*: {quorum}\n*Tie*: {tie}\n*Who can vote*: {electorate}\n*Ballot delivery*: {delivery}\n*Voter disclosure*: {disclosure}{{#if consequences}}\n\n*Consequences*\n{consequences}\n*Apply result*: {policy}{{/if}}'
+    tokens: ['question', 'options', 'purpose', 'rule', 'closing', 'quorum', 'tie', 'electorate', 'delivery', 'disclosure', 'consequences', 'policy',
+      'showPurpose', 'showRule', 'showClosing', 'showQuorum', 'showTie', 'showDelivery', 'showDisclosure'],
+    source: '*Question*\n{question}\n\n*Options*\n{options}\n\n{{#if showPurpose == true}}*Purpose*: {purpose}\n{{/if}}{{#if showRule == true}}*Rule*: {rule}\n{{/if}}{{#if showClosing == true}}*Closing*: {closing}\n{{/if}}{{#if showQuorum == true}}*Quorum*: {quorum}\n{{/if}}{{#if showTie == true}}*Tie*: {tie}\n{{/if}}*Who can vote*: {electorate}{{#if showDelivery == true}}\n*Ballot delivery*: {delivery}{{/if}}{{#if showDisclosure == true}}\n*Voter disclosure*: {disclosure}{{/if}}{{#if consequences}}\n\n*Consequences*\n{consequences}\n*Apply result*: {policy}{{/if}}'
   },
   activation: { title: 'Activation notice', tokens: [...contextTokens, 'closing', 'closesAt'], source: 'Closing time for «{question}»: {closing}' },
   result: {
@@ -63,10 +64,13 @@ export const pollTemplateSamples: Record<string, string> = {
   eligibleCount: '4', turnoutPercent: '50', optionResults: 'Afternoon: 2 responses (100% of respondents) (Ana, Rui)',
   count: '2', respondentPercent: '100', eligiblePercent: '50', voters: 'Ana, Rui', certainOptions: 'Afternoon',
   tiedOptions: 'Morning and afternoon', remainingSeats: '1', medianOptions: 'Afternoon', modeOptions: 'Afternoon',
-  total: '2', unit: 'items', resolver: 'Ana', consequences: 'Update the event.', policy: 'After requester confirmation'
+  total: '2', unit: 'items', resolver: 'Ana', consequences: 'Update the event.', policy: 'After requester confirmation',
+  showPurpose: 'true', showRule: 'true', showClosing: 'true', showQuorum: 'true', showTie: 'true',
+  showDelivery: 'true', showDisclosure: 'true'
 };
 
 const numericTokens = new Set(['ordinal', 'count', 'responseCount', 'eligibleCount', 'turnoutPercent', 'respondentPercent', 'eligiblePercent', 'remainingSeats', 'total', 'activationTimeout']);
+const booleanTokens = new Set(['showPurpose', 'showRule', 'showClosing', 'showQuorum', 'showTie', 'showDelivery', 'showDisclosure']);
 const choiceOptions: Record<string, Array<{ value: string; label: string }>> = {
   ballotDelivery: [{ value: 'private', label: 'Private' }, { value: 'group', label: 'Group' }],
   voterDisclosure: [{ value: 'named', label: 'Named' }, { value: 'hidden', label: 'Hidden' }],
@@ -85,8 +89,9 @@ const choiceOptions: Record<string, Array<{ value: string; label: string }>> = {
 export function pollTemplateFields(kind: PollTemplateKind): TemplateConditionVariable[] {
   return pollTemplateDefinitions[kind].tokens.map(token => ({ token,
     label: token.replace(/([A-Z])/g, ' $1').replace(/^./, letter => letter.toUpperCase()), sampleValue: pollTemplateSamples[token] ?? '',
-    valueType: numericTokens.has(token) ? 'number' : choiceOptions[token] ? 'enum' : 'text', optional: true,
+    valueType: numericTokens.has(token) ? 'number' : booleanTokens.has(token) ? 'boolean' : choiceOptions[token] ? 'enum' : 'text', optional: true,
     ...(numericTokens.has(token) ? { conditionSampleValue: Number(pollTemplateSamples[token]?.replace(/[^0-9.-]/g, '') || 1), ...(token === 'activationTimeout' ? { unit: 'minutes' } : {}) } : {}),
+    ...(booleanTokens.has(token) ? { conditionSampleValue: true } : {}),
     ...(choiceOptions[token] ? { options: choiceOptions[token], conditionSampleValue: choiceOptions[token]![0]!.value } : {})
   }));
 }

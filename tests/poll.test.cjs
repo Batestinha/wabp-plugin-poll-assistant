@@ -13,7 +13,8 @@ const { publishPollRound } = require('../dist/publication');
 const { TransportProviderUnavailableError } = require('@wabs/plugin-sdk/transport-errors');
 const { renderPollTemplate, paginatePollText, pollTemplateSamples } = require('../dist/templates');
 const { parsePollAssistantConfig } = require('../dist/config');
-const { resolveCreationDefinition } = require('../dist/createAction');
+const { resolveCreationDefinition, registerPollCreateAction } = require('../dist/createAction');
+const { pollConfigurationValues } = require('../dist/announcements');
 const { closePoll } = require('../dist/commands');
 const pt = require('../locales/pt-PT/official.poll-assistant.json');
 const t = (key, params) => (pt[key] ?? key).replace(/\{(\w+)\}/g, (token, name) => String(params?.[name] ?? token));
@@ -77,6 +78,38 @@ test('assistant creation resolves scoped defaults and fixed presets before appro
   assert.deepEqual(shared.closing, { kind: 'deadline', deadline: { mode: 'after_publish', durationMinutes: 20 } });
   assert.deepEqual(shared.quorum, { kind: 'percentage', minimumTurnoutBasisPoints: 6000 });
   assert.equal(shared.ballotDelivery, 'private');
+});
+
+test('assistant creation completes after private publication without a group poll message ID', async () => {
+  const db = open(':memory:'); migrate(db, migrations);
+  try {
+    seed(db);
+    const group = getPollAggregate(db, 'fixture-poll');
+    createPoll(db, { definition: { ...group.poll.definition, id: 'private-fixture', ballotDelivery: 'private',
+      electorate: { kind: 'group_members_until_cutoff' } }, scopeId: 'fixture-scope', chatId: 'fixture@g.us',
+      creatorIdentityId: 'fixture-actor', creatorWid: 'fixture@c.us', creatorLabel: 'Fixture actor',
+      roundId: 'private-round', publishIdempotencyKey: 'private-publish', maxActivePollsPerChat: 10, createdAt: timestamp });
+    for (const [operation, pollId] of [['group-op', 'fixture-poll'], ['private-op', 'private-fixture']]) {
+      db.run('INSERT INTO poll_workflow_operations (operation_id,poll_id,scope_id,actor_identity_id,input_digest) VALUES (?,?,?,?,?)',
+        operation, pollId, 'fixture-scope', 'fixture-actor', 'a'.repeat(64));
+    }
+    const context = { pluginId: plugin.manifest.pluginId, databases: { open: () => db },
+      enabledFor: async () => true, resolveStableIdentityById: async id => ({ identityId: id, canonicalWid: 'fixture@c.us' }),
+      configFor: async () => ({}), i18n: { translatorForScope: async () => t },
+      explainPermission: async () => ({ allowed: true }),
+      platform: { transport: { getGroupCapabilities: async () => ({ botIsAdmin: true, canSend: true }) } } };
+    const inspect = registerPollCreateAction(context).methods.find(method => method.name === 'inspect').handler;
+    const call = { scopeId: 'fixture-scope', actorIdentityId: 'fixture-actor', groupWid: 'fixture@g.us' };
+    assert.equal((await inspect({ operationId: 'private-op' }, call)).status, 'pending');
+    db.run('UPDATE poll_rounds SET published_at = ? WHERE id = ?', timestamp, 'private-round');
+    assert.deepEqual((await inspect({ operationId: 'private-op' }, call)).output,
+      { pollId: 'private-fixture', roundId: 'private-round' });
+    db.run('UPDATE poll_rounds SET published_at = ? WHERE id = ?', timestamp, 'fixture-round');
+    assert.equal((await inspect({ operationId: 'group-op' }, call)).status, 'pending');
+    db.run('UPDATE poll_rounds SET poll_wa_message_id = ? WHERE id = ?', 'group-poll-message', 'fixture-round');
+    assert.deepEqual((await inspect({ operationId: 'group-op' }, call)).output,
+      { pollId: 'fixture-poll', roundId: 'fixture-round', messageId: 'group-poll-message' });
+  } finally { db.close(); }
 });
 
 test('new count polls reject zero while legacy stored zero values remain readable', () => {
@@ -266,7 +299,9 @@ test('assistant proposal template has one bold rule and configurable option rows
   ].join('\n');
   assert.equal(options, '*1*) 1\n*2*) 2');
   const values = { ...pollTemplateSamples, question: 'Quantos cafés?', options, rule: 'Somar os cafés', consequences: undefined };
-  const proposal = renderPollTemplate({ kind: 'assistantProposal', t, values });
+  const visibility = Object.fromEntries(['showPurpose', 'showRule', 'showClosing', 'showQuorum', 'showTie',
+    'showDelivery', 'showDisclosure'].map(name => [name, true]));
+  const proposal = renderPollTemplate({ kind: 'assistantProposal', t, values, conditionValues: visibility });
   assert.match(proposal, /\*Pergunta\*\nQuantos cafés\?/);
   assert.match(proposal, /\*Opções\*\n\*1\*\) 1/);
   assert.equal((proposal.match(/\*Regra\*/g) ?? []).length, 1);
@@ -277,6 +312,56 @@ test('assistant proposal template has one bold rule and configurable option rows
   } });
   assert.equal(renderPollTemplate({ kind: 'proposalOption', t, values: { ordinal: 1, label: '1', option: '1' }, overrides: configured.messages }), '1. 1');
   assert.equal(renderPollTemplate({ kind: 'assistantProposal', t, values, overrides: configured.messages }), 'Quantos cafés?\n*1*) 1\n*2*) 2');
+});
+
+test('assistant proposal shows editable preset fields and omits fixed fields', async () => {
+  const preset = { id: 'count-private', label: 'Count privately', isDefault: true,
+    purpose: { mode: 'fixed', value: 'count' }, countUnit: { mode: 'fixed', value: 'cafés' },
+    closing: { mode: 'fixed', kind: 'duration', durationMinutes: 10 },
+    quorum: { mode: 'suggest', kind: 'none' },
+    ballotDelivery: { mode: 'fixed', value: 'private' },
+    voterDisclosure: { mode: 'fixed', value: 'named' } };
+  let config = { creationPresets: [preset] };
+  const context = { pluginId: plugin.manifest.pluginId, enabledFor: async () => true,
+    resolveStableIdentityById: async id => ({ identityId: id, canonicalWid: 'fixture@c.us' }),
+    configFor: async () => config, i18n: { translatorForScope: async () => t },
+    explainPermission: async () => ({ allowed: true }),
+    platform: { transport: { getGroupCapabilities: async () => ({ botIsAdmin: true, canSend: true }) } } };
+  const prepare = registerPollCreateAction(context).methods.find(method => method.name === 'prepare').handler;
+  const call = { scopeId: 'fixture-scope', actorIdentityId: 'fixture-actor', groupWid: 'fixture@g.us' };
+  const request = { input: { groupWid: 'fixture@g.us', definition: { schemaVersion: 1, id: 'draft',
+    purpose: 'count', question: 'Quantos cafés?', options: [
+      { id: 'one', label: '1', ordinal: 1, numericValue: 1 },
+      { id: 'two', label: '2', ordinal: 2, numericValue: 2 } ] } }, bindings: [] };
+  const fixed = await prepare(request, call);
+  assert.match(fixed.proposalText, /\*Pergunta\*\nQuantos cafés\?/);
+  assert.match(fixed.proposalText, /\*Opções\*\n\*1\*\) 1\n\*2\*\) 2/);
+  assert.match(fixed.proposalText, /\*Quórum\*: Nenhuma/);
+  assert.match(fixed.proposalText, /\*Quem pode votar\*:/);
+  for (const label of ['Objetivo', 'Regra', 'Fecho', 'Empate', 'Entrega do boletim', 'Identificação dos votantes']) {
+    assert.doesNotMatch(fixed.proposalText, new RegExp('\\*' + label + '\\*'));
+  }
+  config = { creationPresets: [preset, { id: 'editable', label: 'Editable' }] };
+  const editable = await prepare({ ...request, input: { ...request.input, presetId: 'editable' } }, call);
+  for (const label of ['Objetivo', 'Regra', 'Fecho', 'Quórum', 'Entrega do boletim', 'Identificação dos votantes']) {
+    assert.match(editable.proposalText, new RegExp('\\*' + label + '\\*'));
+  }
+  assert.doesNotMatch(editable.proposalText, /\*Empate\*/);
+  config = { creationPresets: [preset], messages: { assistantProposal: '{question}\n{purpose}\n{closing}' } };
+  const customized = await prepare(request, call);
+  assert.match(customized.proposalText, /Quantos cafés\?\nContabilizar\n10 minutos/);
+});
+
+test('editable decision rules show their exact seat count and approval threshold', () => {
+  const base = { schemaVersion: 1, id: 'decision-preview', purpose: 'decide', question: 'Escolha?',
+    options: [{ id: 'yes', label: 'Sim', ordinal: 1 }, { id: 'no', label: 'Não', ordinal: 2 }],
+    closing: { kind: 'manual' }, quorum: { kind: 'none' }, tiePolicy: { kind: 'no_decision' },
+    electorate: { kind: 'members_at_publication' } };
+  const seats = pollDefinitionSchema.parse({ ...base, rule: { kind: 'multiwinner_approval', seats: 2 } });
+  assert.match(pollConfigurationValues(seats, t, 'Europe/Lisbon').rule, /vencedores: 2/);
+  const approval = pollDefinitionSchema.parse({ ...base, rule: { kind: 'approve_reject',
+    approveOptionId: 'yes', rejectOptionId: 'no', minimumApprovalBasisPoints: 6250 } });
+  assert.match(pollConfigurationValues(approval, t, 'Europe/Lisbon').rule, /limiar de aprovação: 62\.5%/);
 });
 
 test('long result pages preserve every Unicode codepoint and blank overrides restore localized defaults', () => {
