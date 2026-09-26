@@ -68,6 +68,7 @@ export function registerPollCreateAction(context: PluginServiceRegistrationConte
         showTie: input.definition.purpose === 'decide' && preset?.tiePolicy.mode !== 'fixed',
         showDelivery: preset?.ballotDelivery.mode !== 'fixed',
         showDisclosure: preset?.voterDisclosure.mode !== 'fixed'
+          && !(preset?.ballotDelivery.mode === 'fixed' && preset.ballotDelivery.value === 'group')
       } });
       return { input, summary, proposalText, entries: [
         { title: current.t('official.poll-assistant.outcome.entry.question'), value: input.definition.question },

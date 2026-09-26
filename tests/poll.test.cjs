@@ -347,6 +347,10 @@ test('assistant proposal shows editable preset fields and omits fixed fields', a
     assert.match(editable.proposalText, new RegExp('\\*' + label + '\\*'));
   }
   assert.doesNotMatch(editable.proposalText, /\*Empate\*/);
+  config = { creationPresets: [{ ...preset, id: 'group-only', ballotDelivery: { mode: 'fixed', value: 'group' },
+    voterDisclosure: { mode: 'ask', value: 'named' } }] };
+  const groupOnly = await prepare(request, call);
+  assert.doesNotMatch(groupOnly.proposalText, /\*Identificação dos votantes\*/);
   config = { creationPresets: [preset], messages: { assistantProposal: '{question}\n{purpose}\n{closing}' } };
   const customized = await prepare(request, call);
   assert.match(customized.proposalText, /Quantos cafés\?\nContabilizar\n10 minutos/);

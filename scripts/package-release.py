@@ -19,6 +19,12 @@ def build_release():
         raise ValueError('Pinned SDK provenance mismatch')
     if manifest['version'] != package['version']:
         raise ValueError('Package and manifest versions differ')
+    runtime_version = subprocess.run(
+        ['node', '-e', 'process.stdout.write(require("./dist/index.js").default.manifest.version)'],
+        cwd=root, capture_output=True, text=True, encoding='utf-8', check=True
+    ).stdout
+    if runtime_version != package['version']:
+        raise ValueError('Compiled runtime manifest version differs from package version')
     contracts = json.loads((root / provenance['vendoredContracts']).read_text(encoding='utf-8'))
     for contract in contracts['contracts']:
         expected = contract['upstreamSha256']
