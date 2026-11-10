@@ -1,0 +1,147 @@
+name: Release standalone plugin
+
+# Releases are built here, never on a workstation. The archive's gzip bytes depend on the zlib
+# implementation, so the builder is pinned: Fedora 44 with zlib-ng-compat 2.3.3-3.fc44. Set
+# expected_sha256 when the version is already installed somewhere; WABP refuses a version whose
+# bytes change, so the release must carry exactly those bytes.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Full 40-character commit SHA on main to release
+        required: true
+        type: string
+      expected_sha256:
+        description: SHA-256 the archive must reproduce (required for a version that is already installed)
+        required: false
+        type: string
+        default: ''
+      notes:
+        description: What changed, for the release notes
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: docker.io/library/fedora:44@sha256:b189269dfee735c54ebcd3b4e43ff2dc0d4a4b07855468970217c9df57968eb0
+    outputs:
+      file: ${{ steps.archive.outputs.file }}
+      name: ${{ steps.archive.outputs.name }}
+      sha256: ${{ steps.archive.outputs.sha256 }}
+      version: ${{ steps.archive.outputs.version }}
+    steps:
+      - name: Check the inputs
+        shell: bash
+        env:
+          REF: ${{ inputs.ref }}
+          EXPECTED: ${{ inputs.expected_sha256 }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$REF" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::ref must be a full commit SHA"; exit 1; }
+          [[ -z "$EXPECTED" || "$EXPECTED" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::expected_sha256 must be 64 hex characters"; exit 1; }
+      - name: Install the canonical archive toolchain
+        run: |
+          set -Eeuo pipefail
+          dnf -y -q --setopt=install_weak_deps=False install python3 python-unversioned-command git-core tar gzip findutils
+          test "$(rpm -q zlib-ng-compat)" = zlib-ng-compat-2.3.3-3.fc44.x86_64
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require a commit on main
+        shell: bash
+        env:
+          REF: ${{ inputs.ref }}
+        # actions/checkout drops its safe.directory exception after cloning; the container runs as root.
+        run: |
+          set -Eeuo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git merge-base --is-ancestor "$REF" origin/main || { echo "::error::$REF is not on main"; exit 1; }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.2'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - name: Build the archive twice and check it
+        id: archive
+        shell: bash
+        env:
+          EXPECTED: ${{ inputs.expected_sha256 }}
+        run: |
+          set -Eeuo pipefail
+          npm run -s release:archive | tail -n 1 > "$RUNNER_TEMP/first.json"
+          npm run -s release:archive | tail -n 1 > "$RUNNER_TEMP/second.json"
+          cat "$RUNNER_TEMP/first.json"
+          python3 - "$RUNNER_TEMP/first.json" "$RUNNER_TEMP/second.json" "$GITHUB_OUTPUT" <<'PY'
+          import json, os, sys
+          first, second = (json.load(open(path)) for path in sys.argv[1:3])
+          if first["sha256"] != second["sha256"]:
+              print("::error::the archive is not reproducible"); sys.exit(1)
+          expected = os.environ["EXPECTED"]
+          if expected and first["sha256"] != expected:
+              print(f"::error::archive {first['sha256']} differs from the expected {expected}"); sys.exit(1)
+          manifest = json.load(open("wa-plugin.json"))
+          with open(sys.argv[3], "a") as out:
+              out.write(f"file={os.path.basename(first['archive'])}\nsha256={first['sha256']}\n")
+              out.write(f"version={manifest['version']}\nname={manifest['name']}\n")
+          PY
+      - name: Load outside the repository with packaged dependencies
+        shell: bash
+        env:
+          FILE: ${{ steps.archive.outputs.file }}
+        run: |
+          set -Eeuo pipefail
+          fixture_dir="$(mktemp -d "${RUNNER_TEMP}/wabs-fixture.XXXXXX")"
+          tar -xzf ".cache/$FILE" -C "$fixture_dir"
+          node tests/archive-smoke.cjs "$fixture_dir/package"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-archive
+          path: .cache/${{ steps.archive.outputs.file }}
+          retention-days: 90
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-archive
+          path: dist
+      - name: Create the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF: ${{ inputs.ref }}
+          NOTES: ${{ inputs.notes }}
+          FILE: ${{ needs.build.outputs.file }}
+          NAME: ${{ needs.build.outputs.name }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
+          VERSION: ${{ needs.build.outputs.version }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -Eeuo pipefail
+          echo "$SHA256  dist/$FILE" | sha256sum --check
+          if gh release view "v$VERSION" >/dev/null 2>&1; then echo "::error::release v$VERSION already exists"; exit 1; fi
+          body="${NOTES:+$NOTES
+
+          }Built by $RUN_URL from $REF in fedora:44 (zlib-ng-compat 2.3.3-3.fc44). Archive SHA-256: $SHA256."
+          gh release create "v$VERSION" "dist/$FILE" --target "$REF" --title "$NAME $VERSION" --notes "$body"

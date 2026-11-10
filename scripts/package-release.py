@@ -8,6 +8,7 @@ import os
 import subprocess
 import tarfile
 import tempfile
+import zlib
 
 
 def build_release():
@@ -75,8 +76,10 @@ def build_release():
                         archive.addfile(header, io.BytesIO(data))
         if target.stat().st_size > 50 * 1024 * 1024:
             raise ValueError('Release exceeds WABP archive download budget')
+        # The gzip bytes depend on the zlib implementation; release.yml pins the canonical one.
         print(json.dumps({'archive': str(target), 'bytes': target.stat().st_size,
-                          'sha256': hashlib.sha256(target.read_bytes()).hexdigest(), 'files': len(files)}))
+                          'sha256': hashlib.sha256(target.read_bytes()).hexdigest(), 'files': len(files),
+                          'zlib': zlib.ZLIB_RUNTIME_VERSION}))
 
 
 if __name__ == '__main__':
