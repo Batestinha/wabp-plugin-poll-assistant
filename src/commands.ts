@@ -737,12 +737,7 @@ async function startPollCreation(context: PluginCommandContext, ctx: CommandCont
       scopeId,
       originGroupWid,
       ...(ctx.groupId ? { originGroupId: ctx.groupId } : {}),
-      preferences,
-      privateDeliveryFallback: {
-        chatId: originGroupWid,
-        mentionedWids: [actor.mentionWid],
-        quotedMessageId: ctx.message.id
-      }
+      preferences
     });
     return { handled: true, response: { kind: 'none' as const } };
   } catch {
