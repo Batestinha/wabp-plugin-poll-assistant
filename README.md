@@ -50,3 +50,13 @@ time, original publication, and result fields, so a publication template can be
 copied and its state wording changed. WhatsApp's 15-minute editing window still applies; an expired
 or rejected edit is audited and never interrupts poll results. Both options are
 disabled by default, and their durable recovery state survives runtime restarts.
+
+## Command interaction contract
+
+This release requires WABP core API 0.4 and the matching plugin SDK. Commands
+declare invocation eligibility and the audience and length of their conversation
+through `interactionPolicy`; plugins without commands retain an empty command
+list. The host owns group-to-PM notices, the two-question allowance for brief
+clarification, and routing across assistant execution and recovered flows. Personal
+guided workflows stay private, with domain publications delivered through their
+existing authorized group publication paths.

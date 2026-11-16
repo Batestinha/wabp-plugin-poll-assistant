@@ -10,7 +10,7 @@ import { pollOutcomeFromFlow } from './outcomeFlow';
 import { frozenPollOutcomeSchema, freezePollOutcome } from './outcomeConfig';
 import { type DurableFlowEngine as FlowEngine } from '@wabs/plugin-sdk/durable-flow';
 import { type FlowSessionSnapshot } from '@wabs/plugin-sdk/flow-engine';
-import type { CommandMetadata } from '@wabs/plugin-sdk/command-metadata';
+import type { PluginCommandMetadata, CommandMetadata } from '@wabs/plugin-sdk/command-metadata';
 import type { CommandContext } from '@wabs/plugin-sdk/commands';
 import { type TranslateFn } from '@wabs/plugin-sdk/i18n';
 import { type PluginCancellationRegistration } from '@wabs/plugin-sdk/cancellations';
@@ -161,7 +161,8 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
       ? { status: 'completed', output: { pollId: recipe.pollId }, summary: t('official.poll-assistant.outcome.created', { question: aggregate.poll.definition.question, pollId: recipe.pollId }) }
       : { status: 'pending', operationId: `${owner.runId}:${owner.operationId}`, summary: t('official.poll-assistant.outcome.publicationPending') };
   });
-  context.router.register('poll', 'actions', pollCommand({ auditAction: 'poll-assistant.actions',
+  context.router.register('poll', 'actions', pollCommand({
+    interactionPolicy: { kind: 'immediate', conversationAudience: 'requester', resultAudience: 'invoking_chat' }, auditAction: 'poll-assistant.actions',
     usage: '/poll actions <poll ID> [status|review|retry|cancel]',
     descriptionKey: 'official.poll-assistant.outcome.help', exampleKey: 'official.poll-assistant.outcome.help.example', topicId: 'manage'
   }), async (ctx) => pollActionsCommand(context, ctx));
@@ -188,6 +189,7 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
   }, registerCompletion);
 
   context.router.register('poll', 'create', pollCommand({
+    interactionPolicy: { kind: 'guided', conversationAudience: 'requester', resultAudience: 'requester' },
     interaction: 'group_ack_private_continuation',
     permission: POLL_ASSISTANT_COMMAND_PERMISSIONS.create,
     allowCurrentManagedGroupMemberConfigPath: 'allowMemberCreation',
@@ -200,6 +202,7 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
   }), async (ctx) => startPollCreation(context, ctx));
 
   context.router.register('poll', 'list', pollCommand({
+    interactionPolicy: { kind: 'immediate', conversationAudience: 'requester', resultAudience: 'invoking_chat' },
     mutation: 'none',
     auditAction: 'poll-assistant.list',
     usage: '/poll list',
@@ -209,6 +212,7 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
   }), async (ctx) => listPolls(context, ctx));
 
   context.router.register('poll', 'status', pollCommand({
+    interactionPolicy: { kind: 'immediate', conversationAudience: 'requester', resultAudience: 'invoking_chat' },
     mutation: 'none',
     auditAction: 'poll-assistant.status',
     usage: '/poll status <poll ID>',
@@ -218,6 +222,7 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
   }), async (ctx) => pollStatus(context, ctx));
 
   context.router.register('poll', 'close', pollCommand({
+    interactionPolicy: { kind: 'brief', conversationAudience: 'requester', resultAudience: 'invoking_chat' },
     dangerous: true,
     rateLimitExempt: true,
     auditAction: 'poll-assistant.close',
@@ -228,6 +233,7 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
   }), async (ctx) => closePoll(context, ctx));
 
   context.router.register('poll', 'open', pollCommand({
+    interactionPolicy: { kind: 'brief', conversationAudience: 'requester', resultAudience: 'invoking_chat' },
     dangerous: true,
     auditAction: 'poll-assistant.open',
     usage: '/poll open [poll ID or question] [--confirm]',
@@ -237,6 +243,7 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
   }), async (ctx) => openPoll(context, ctx));
 
   context.router.register('poll', 'cancel', pollCommand({
+    interactionPolicy: { kind: 'brief', conversationAudience: 'requester', resultAudience: 'invoking_chat' },
     dangerous: true,
     auditAction: 'poll-assistant.cancel',
     usage: '/poll cancel <poll ID> --confirm',
@@ -246,6 +253,7 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
   }), async (ctx) => cancelPollLifecycle(context, ctx));
 
   context.router.register('poll', 'resolve', pollCommand({
+    interactionPolicy: { kind: 'brief', conversationAudience: 'requester', resultAudience: 'invoking_chat' },
     dangerous: true,
     auditAction: 'poll-assistant.resolve',
     usage: '/poll resolve <poll ID> <option ID or number> [more options] --confirm',
@@ -255,6 +263,7 @@ export function registerPollAssistantCommands(context: PluginCommandContext): vo
   }), async (ctx) => resolvePollLifecycleTie(context, ctx));
 
   context.router.register('poll', '*', pollCommand({
+    interactionPolicy: { kind: 'guided', conversationAudience: 'requester', resultAudience: 'requester' },
     interaction: 'group_ack_private_continuation',
     permission: POLL_ASSISTANT_COMMAND_PERMISSIONS.create,
     allowCurrentManagedGroupMemberConfigPath: 'allowMemberCreation',
@@ -728,19 +737,9 @@ async function startPollCreation(context: PluginCommandContext, ctx: CommandCont
       scopeId,
       originGroupWid,
       ...(ctx.groupId ? { originGroupId: ctx.groupId } : {}),
-      preferences,
-      privateDeliveryFallback: {
-        chatId: originGroupWid,
-        mentionedWids: [actor.mentionWid],
-        quotedMessageId: ctx.message.id
-      }
+      preferences
     });
-    return {
-      handled: true,
-      text: ctx.t(started.usedPrivateDeliveryFallback
-        ? 'official.poll-assistant.startedInGroupFallback'
-        : 'official.poll-assistant.startedPrivate')
-    };
+    return { handled: true, response: { kind: 'none' as const } };
   } catch {
     return { handled: true, text: ctx.t('official.poll-assistant.startFailed') };
   }
@@ -1332,6 +1331,7 @@ async function canManagePoll(
 }
 
 function pollCommand(input: {
+  interactionPolicy: PluginCommandMetadata['interactionPolicy'];
   interaction?: CommandMetadata['interaction'] | undefined;
   mutation?: CommandMetadata['mutation'] | undefined;
   permission?: string | undefined;
@@ -1344,10 +1344,12 @@ function pollCommand(input: {
   descriptionKey: string;
   exampleKey: string;
   topicId: 'create' | 'inspect' | 'manage';
-}): CommandMetadata {
+}): PluginCommandMetadata {
   return {
+    interactionPolicy: input.interactionPolicy,
     plane: 'group_operation',
     interaction: input.interaction ?? 'group_same_chat',
+    invocation: 'group_only',
     pluginId: POLL_ASSISTANT_PLUGIN_ID,
     requiresManagedGroup: true,
     requiresCurrentManagedGroupMembership: true,

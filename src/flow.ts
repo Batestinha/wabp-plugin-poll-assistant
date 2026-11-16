@@ -454,6 +454,7 @@ function buildPollCreationFlowDefinition(input: {
     flowType: input.flowType,
     t: input.t,
     initialStepId: PURPOSE_STEP_ID,
+    interactionPolicy: { kind: 'guided', conversationAudience: 'requester', resultAudience: 'requester' },
     context: 'private',
     timeoutMinutes: 30,
     completionReply: false,
