@@ -20,7 +20,7 @@ export const pollCreateAction: WorkflowActionDeclaration = {
   serviceId: POLL_CREATE_ACTION_SERVICE, methods: { describe: 'describe', prepare: 'prepare', execute: 'execute', inspect: 'inspect' },
   requiredPermissions: [], requiredBotCapabilities: ['botIsAdmin', 'canSend'],
   inputSchema: { type: 'object', required: ['groupWid', 'definition'], additionalProperties: false, properties: {
-    groupWid: { type: 'string', title: 'Group' },
+    groupWid: { type: 'string', title: 'Group', description: 'WhatsApp group ID of the group the poll is published in. From a private chat, use the groupWid of a group in context.targetGroups.' },
     presetId: { type: 'string', description: 'Optional enabled creation preset ID. The scope default preset is used when omitted.' },
     definition: { type: 'object', description: 'Poll definition schema version 1. Use id "draft" and stable option IDs option:1, option:2, etc. Omitted settings resolve from the selected or scoped default creation preset.',
       required: ['purpose', 'question', 'options'],

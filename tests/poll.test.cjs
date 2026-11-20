@@ -356,6 +356,41 @@ test('assistant proposal shows editable preset fields and omits fixed fields', a
   assert.match(customized.proposalText, /Quantos cafés\?\nContabilizar\n10 minutos/);
 });
 
+test('locked preset fields name the locked value and approve/reject polls bind the options the requester means', () => {
+  // Listed reject-first: the option position must not decide which option approves.
+  const draft = { purpose: 'decide', question: 'Aprovamos a proposta?',
+    options: [{ id: 'no', label: 'Não', ordinal: 1 }, { id: 'yes', label: 'Sim', ordinal: 2 }] };
+  const locked = parsePollAssistantConfig({ creationPresets: [{ id: 'private', label: 'Private', isDefault: true,
+    ballotDelivery: { mode: 'fixed', value: 'private' }, voterDisclosure: { mode: 'fixed', value: 'named' } }] });
+  assert.throws(() => resolveCreationDefinition({ ...draft, ballotDelivery: 'group' }, locked), /fixes ballotDelivery to "private"; omit ballotDelivery/);
+  const approveReject = parsePollAssistantConfig({ creationPresets: [{ id: 'ar', label: 'Approve', isDefault: true,
+    decideRule: { mode: 'fixed', kind: 'approve_reject', minimumApprovalBasisPoints: 6000 } }] });
+  assert.throws(() => resolveCreationDefinition({ ...draft, options: [...draft.options, { id: 'abstain', label: 'Abstenção', ordinal: 3 }] },
+    approveReject), /set rule.approveOptionId and rule.rejectOptionId/);
+  const bound = resolveCreationDefinition({ ...draft, rule: { kind: 'approve_reject', approveOptionId: 'yes', rejectOptionId: 'no' } }, approveReject);
+  assert.deepEqual(bound.rule, { kind: 'approve_reject', approveOptionId: 'yes', rejectOptionId: 'no', minimumApprovalBasisPoints: 6000 });
+  assert.throws(() => resolveCreationDefinition({ ...draft, rule: { kind: 'approve_reject', approveOptionId: 'yes', rejectOptionId: 'no',
+    minimumApprovalBasisPoints: 5001 } }, approveReject), /fixes rule/);
+  // Without a binding, two options keep the established first-approves order.
+  const pair = resolveCreationDefinition(draft, approveReject);
+  assert.deepEqual(pair.rule, { kind: 'approve_reject', approveOptionId: 'no', rejectOptionId: 'yes', minimumApprovalBasisPoints: 6000 });
+});
+
+test('describe answers only for the group the host bound to the call', async () => {
+  const context = { pluginId: plugin.manifest.pluginId, enabledFor: async () => true,
+    resolveStableIdentityById: async id => ({ identityId: id, canonicalWid: 'fixture@c.us' }),
+    configFor: async () => ({}), i18n: { translatorForScope: async () => t },
+    explainPermission: async () => ({ allowed: true }),
+    platform: { transport: { getGroupCapabilities: async () => ({ botIsAdmin: true, canSend: true }) } } };
+  const describe = registerPollCreateAction(context).methods.find(method => method.name === 'describe').handler;
+  const call = { scopeId: 'fixture-scope', actorIdentityId: 'fixture-actor', groupWid: 'event@g.us' };
+  // A group name, or another group's ID, is not silently answered with the call's own group.
+  await assert.rejects(describe({ input: { groupWid: 'Topo & Maré - Principal' } }, call));
+  await assert.rejects(describe({ input: { groupWid: 'main@g.us' } }, call));
+  assert.equal((await describe({ input: { groupWid: 'event@g.us' } }, call)).groupWid, 'event@g.us');
+  assert.equal((await describe({ input: {} }, call)).groupWid, 'event@g.us');
+});
+
 test('editable decision rules show their exact seat count and approval threshold', () => {
   const base = { schemaVersion: 1, id: 'decision-preview', purpose: 'decide', question: 'Escolha?',
     options: [{ id: 'yes', label: 'Sim', ordinal: 1 }, { id: 'no', label: 'Não', ordinal: 2 }],
