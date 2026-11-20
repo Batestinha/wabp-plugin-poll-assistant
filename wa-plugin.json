@@ -4,7 +4,7 @@
   "name": "Poll Assistant",
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "kind": "managed_group",
-  "version": "0.7.12",
+  "version": "0.7.13",
   "coreApiRange": "^0.3.10",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
@@ -5262,7 +5262,8 @@
         "properties": {
           "groupWid": {
             "type": "string",
-            "title": "Group"
+            "title": "Group",
+            "description": "WhatsApp group ID of the group the poll is published in. From a private chat, use the groupWid of a group in context.targetGroups."
           },
           "presetId": {
             "type": "string",

@@ -18,9 +18,14 @@ export function registerPollCreateAction(context: PluginServiceRegistrationConte
   const execute = z.object({ input: pollCreateActionInputSchema, guard: z.record(z.unknown()), operationId: z.string().min(1), predecessors: z.record(z.unknown()) }).strict();
   const inspect = z.object({ operationId: z.string().min(1) }).strict();
   return { serviceId: POLL_CREATE_ACTION_SERVICE, methods: [
-    { name: 'describe', access: 'read', inputSchema: read, outputSchema: z.record(z.unknown()), handler: async (_raw, call) => {
-      await requester(context, call);
-      return { inputSchema: pollCreateAction.inputSchema, groupWid: call.groupWid ?? null,
+    { name: 'describe', access: 'read', inputSchema: read, outputSchema: z.record(z.unknown()), handler: async (raw, call) => {
+      // Describe never resolves a group name. A named group must be the group
+      // the host bound to this call, otherwise the call fails instead of
+      // silently answering for a different group.
+      const named = read.parse(raw).input.groupWid;
+      const groupWid = typeof named === 'string' && named.trim() ? named.trim() : undefined;
+      await requester(context, call, groupWid ? { groupWid } : undefined);
+      return { inputSchema: pollCreateAction.inputSchema, groupWid: call.groupWid ?? groupWid ?? null,
         outcomeActions: context.flowEngine?.workflowActions ? await context.flowEngine.workflowActions.list({ runtimeBindingId: context.flowEngine.workflowRuntimeBindingId,
           source: 'poll_outcome', scopeId: call.scopeId, actorIdentityId: call.actorIdentityId!, chatId: call.groupWid ?? '',
           ...(call.groupWid ? { groupWid: call.groupWid } : {}), ...(call.groupId ? { groupId: call.groupId } : {}) }) : [] };
@@ -132,7 +137,7 @@ export function resolveCreationDefinition(raw: Record<string, unknown>, config: 
   } : undefined);
   const fixed = (field: string, mode: string | undefined, supplied: unknown, value: unknown) => {
     if (mode === 'fixed' && supplied !== undefined && workflowDigest(supplied) !== workflowDigest(value)) {
-      throw new Error(`Poll creation preset fixes ${field}`);
+      throw new Error(`Poll creation preset fixes ${field} to ${JSON.stringify(value)}; omit ${field} or use exactly that value`);
     }
     return supplied ?? value;
   };
@@ -153,17 +158,21 @@ export function resolveCreationDefinition(raw: Record<string, unknown>, config: 
       : preset?.decideRule.kind === 'single_non_transferable' || preset?.decideRule.kind === 'multiwinner_approval'
         ? { kind: preset.decideRule.kind, seats: preset.decideRule.seats }
         : preset?.decideRule.kind === 'approve_reject'
-          ? { kind: 'approve_reject', approveOptionId: (raw.options as Array<{ id: string }> | undefined)?.[0]?.id,
-            rejectOptionId: (raw.options as Array<{ id: string }> | undefined)?.[1]?.id,
-            minimumApprovalBasisPoints: preset.decideRule.minimumApprovalBasisPoints }
+          ? approveRejectRule(raw, preset.decideRule.minimumApprovalBasisPoints)
           : { kind: preset?.decideRule.kind ?? 'plurality' };
   const ruleMode = purpose === 'count' ? preset?.countUnit.mode : purpose === 'measure' ? preset?.measureRule.mode : preset?.decideRule.mode;
+  // Naming which options approve and reject binds options; it does not change the preset's rule.
+  const suppliedRule = rule.kind === 'approve_reject' && approveRejectBindingOnly(raw.rule, rule as { minimumApprovalBasisPoints?: number }) ? undefined : raw.rule;
+  const resolvedRule = fixed('rule', ruleMode, suppliedRule, rule) as Record<string, unknown>;
+  if (resolvedRule.kind === 'approve_reject' && (typeof resolvedRule.approveOptionId !== 'string' || typeof resolvedRule.rejectOptionId !== 'string')) {
+    throw new Error('This poll decides by approve or reject: set rule.approveOptionId and rule.rejectOptionId to the option IDs that mean approve and reject');
+  }
   const result = pollDefinitionSchema.parse({
     schemaVersion: raw.schemaVersion ?? 1,
     id: raw.id ?? 'draft',
     ...raw,
     purpose,
-    rule: fixed('rule', ruleMode, raw.rule, rule),
+    rule: resolvedRule,
     closing: fixed('closing', preset?.closing.mode, raw.closing, closing),
     quorum: fixed('quorum', preset?.quorum.mode, raw.quorum, preferences.defaultQuorum),
     ballotDelivery,
@@ -176,6 +185,24 @@ export function resolveCreationDefinition(raw: Record<string, unknown>, config: 
     throw new Error('Count poll option values must be greater than zero.');
   }
   return result;
+}
+
+/** Approve and reject are the options the requester named, or the only two options there are. */
+function approveRejectRule(raw: Record<string, unknown>, minimumApprovalBasisPoints: number) {
+  const supplied = raw.rule && typeof raw.rule === 'object' ? raw.rule as Record<string, unknown> : {};
+  const options = Array.isArray(raw.options) ? raw.options as Array<{ id?: unknown }> : [];
+  const pair = options.length === 2 ? options.map((option) => option.id) : [];
+  return { kind: 'approve_reject', minimumApprovalBasisPoints,
+    approveOptionId: typeof supplied.approveOptionId === 'string' ? supplied.approveOptionId : pair[0],
+    rejectOptionId: typeof supplied.rejectOptionId === 'string' ? supplied.rejectOptionId : pair[1] };
+}
+
+function approveRejectBindingOnly(supplied: unknown, rule: { minimumApprovalBasisPoints?: number }): boolean {
+  if (!supplied || typeof supplied !== 'object' || Array.isArray(supplied)) return false;
+  const entries = supplied as Record<string, unknown>;
+  return Object.keys(entries).every((key) => ['kind', 'approveOptionId', 'rejectOptionId', 'minimumApprovalBasisPoints'].includes(key))
+    && (entries.kind === undefined || entries.kind === 'approve_reject')
+    && (entries.minimumApprovalBasisPoints === undefined || entries.minimumApprovalBasisPoints === rule.minimumApprovalBasisPoints);
 }
 
 async function requester(context: PluginServiceRegistrationContext, call: PluginServiceCallContext,
