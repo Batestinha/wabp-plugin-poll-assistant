@@ -32,7 +32,7 @@
     "node": ">=22"
   },
   "dependencies": {
-    "@wabs/plugin-sdk": "file:vendor/wabs-plugin-sdk-0.3.39-1a21ae740273.tgz",
+    "@wabs/plugin-sdk": "file:vendor/wabs-plugin-sdk-0.3.39-0c9dec433b77.tgz",
     "zod": "3.25.76"
   },
   "devDependencies": {
