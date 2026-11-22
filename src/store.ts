@@ -1931,12 +1931,14 @@ export function markPollPrivateIssuanceSent(db: PluginDatabase, input: {
   const result = db.run(
     `UPDATE poll_private_issuances
         SET status = 'sent', poll_wa_message_id = ?, remote_chat_id = ?, accepted_at = ?,
+            publication_started_at = COALESCE(publication_started_at, ?),
             claim_token = NULL, lease_expires_at = NULL, next_attempt_at = NULL,
             updated_at = ?, last_error = NULL
       WHERE id = ? AND status = 'publishing' AND claim_token = ?
-        AND publication_started_at IS NOT NULL AND poll_wa_message_id IS NULL`,
+        AND poll_wa_message_id IS NULL`,
     required(input.pollWaMessageId, 'pollWaMessageId'),
     input.remoteChatId?.trim() || null,
+    acceptedAt,
     acceptedAt,
     acceptedAt,
     required(input.issuanceId, 'issuanceId'),

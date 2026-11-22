@@ -275,7 +275,10 @@ test('private ballots recover receipts before publishing and reuse the recipient
       await publishPrivatePollIssuance(ctx, issuance.id, () => new Date(timestamp));
       await publishPrivatePollIssuance(ctx, issuance.id, () => new Date(timestamp));
       assert.equal(reconciles, 1);
-      assert.equal(getPollPrivateIssuance(db, issuance.id).pollWaMessageId,
+      const delivered = getPollPrivateIssuance(db, issuance.id);
+      assert.equal(delivered.status, 'sent', delivered.lastError);
+      assert.equal(delivered.publicationStartedAt, timestamp);
+      assert.equal(delivered.pollWaMessageId,
         issuance.voterIdentityId === 'already-sent' ? 'previous' : 'published');
     }
     assert.deepEqual(issued, ['new']);
