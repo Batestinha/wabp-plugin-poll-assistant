@@ -5,12 +5,7 @@ import type { PollBallotMappingTarget } from './ballotMapping';
 import type { PollReadbackBallot } from './domain';
 import type { PollAssistantLifecycleSnapshot } from './lifecycleServiceApi';
 import { parsePollAssistantConfig } from './config';
-import {
-  DOAS_PRIVATE_POLL_RECONCILE_METHOD,
-  DOAS_PRIVATE_POLL_SERVICE_ID,
-  doasPrivatePollReconcileInputSchema,
-  type DoasPrivatePollReconcileOutput
-} from './contracts/doas-poll-v1';
+import { hostPrivatePollReconcileInputSchema } from '@wabs/plugin-sdk/host-polls';
 import { enqueuePollDeliveryJob, enqueuePollFinalizeJob, pollRetryAt } from './jobs';
 import { calculatePollResult } from './resultCalculator';
 import { renderPollResultMessages, renderPollResultDeliveries } from './resultRendering';
@@ -310,18 +305,16 @@ async function reconcilePrivatePollIssuancesAtCutoff(
       continue;
     }
 
-    if (!context.services) {
+    if (!context.privatePolls) {
       throw new Error('Private poll receipt reconciliation service is unavailable.');
     }
     renewClaim();
-    const receipt = await context.services.call<DoasPrivatePollReconcileOutput>({
-      serviceId: DOAS_PRIVATE_POLL_SERVICE_ID,
-      method: DOAS_PRIVATE_POLL_RECONCILE_METHOD,
+    const receipt = await context.privatePolls.reconcile({
       scopeId: snapshot.poll.scopeId,
       actorIdentityId: snapshot.poll.creatorIdentityId,
       ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
       groupWid: snapshot.poll.chatId,
-      input: doasPrivatePollReconcileInputSchema.parse({
+      input: hostPrivatePollReconcileInputSchema.parse({
         groupWid: snapshot.poll.chatId,
         recipientIdentityId: issuance.voterIdentityId,
         recipientDeliveryChatId: issuance.voterWid,

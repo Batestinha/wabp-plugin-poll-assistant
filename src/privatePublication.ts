@@ -7,14 +7,10 @@ import {
   isTransportProviderUnavailableError
 } from '@wabs/plugin-sdk/transport-errors';
 import {
-  DOAS_PRIVATE_POLL_PUBLISH_METHOD,
-  DOAS_PRIVATE_POLL_RECONCILE_METHOD,
-  DOAS_PRIVATE_POLL_SERVICE_ID,
-  doasPrivatePollPublishInputSchema,
-  doasPrivatePollReconcileInputSchema,
-  type DoasPrivatePollPublishOutput,
-  type DoasPrivatePollReconcileOutput
-} from './contracts/doas-poll-v1';
+  hostPrivatePollPublishInputSchema,
+  hostPrivatePollReconcileInputSchema,
+  type HostPrivatePollReconcileOutput
+} from '@wabs/plugin-sdk/host-polls';
 import { enqueuePollPrivateIssueJob, pollRetryAt } from './jobs';
 import { deliverPollPrivatePublicationAudit } from './privatePublicationAudit';
 import {
@@ -58,17 +54,15 @@ export async function publishPrivatePollIssuance(
     if (notAfter && Date.parse(notAfter) <= clock().getTime()) {
       throw new PrivateIssuanceTerminalError('The private ballot voting window has ended.');
     }
-    if (!context.services) {
-      throw new Error('Private poll publication service registry is unavailable.');
+    if (!context.privatePolls) {
+      throw new Error('Private poll publication is unavailable.');
     }
-    const receipt = await context.services.call<DoasPrivatePollReconcileOutput>({
-      serviceId: DOAS_PRIVATE_POLL_SERVICE_ID,
-      method: DOAS_PRIVATE_POLL_RECONCILE_METHOD,
+    const receipt = await context.privatePolls.reconcile({
       scopeId: snapshot.poll.scopeId,
       actorIdentityId: snapshot.poll.creatorIdentityId,
       ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
       groupWid: snapshot.poll.chatId,
-      input: doasPrivatePollReconcileInputSchema.parse({
+      input: hostPrivatePollReconcileInputSchema.parse({
         groupWid: snapshot.poll.chatId,
         recipientIdentityId: issuance.voterIdentityId,
         recipientDeliveryChatId: issuance.voterWid,
@@ -107,14 +101,12 @@ export async function publishPrivatePollIssuance(
     );
     const providerNotAfter = privateIssuanceNotAfter(providerSnapshot.snapshot);
     providerMutationAttempted = true;
-    const sent = await context.services.call<DoasPrivatePollPublishOutput>({
-      serviceId: DOAS_PRIVATE_POLL_SERVICE_ID,
-      method: DOAS_PRIVATE_POLL_PUBLISH_METHOD,
+    const sent = await context.privatePolls.publish({
       scopeId: snapshot.poll.scopeId,
       actorIdentityId: snapshot.poll.creatorIdentityId,
       ...(snapshot.poll.groupId ? { groupId: snapshot.poll.groupId } : {}),
       groupWid: snapshot.poll.chatId,
-      input: doasPrivatePollPublishInputSchema.parse({
+      input: hostPrivatePollPublishInputSchema.parse({
         groupWid: providerSnapshot.snapshot.poll.chatId,
         recipientIdentityId: providerSnapshot.issuance.voterIdentityId,
         recipientDeliveryChatId: providerSnapshot.issuance.voterWid,
@@ -265,7 +257,7 @@ function persistPrivateReceipt(
   db: ReturnType<typeof pollsDatabase>,
   issuance: StoredPollPrivateIssuance,
   claimToken: string,
-  receipt: DoasPrivatePollReconcileOutput
+  receipt: HostPrivatePollReconcileOutput
 ): void {
   const messageId = receipt.messageId?.trim();
   const acceptedAt = receipt.acceptedAt?.trim();

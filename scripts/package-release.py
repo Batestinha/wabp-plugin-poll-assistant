@@ -26,14 +26,6 @@ def build_release():
     ).stdout
     if runtime_version != package['version']:
         raise ValueError('Compiled runtime manifest version differs from package version')
-    contracts = json.loads((root / provenance['vendoredContracts']).read_text(encoding='utf-8'))
-    for contract in contracts['contracts']:
-        expected = contract['upstreamSha256']
-        if contract['patches'] or contract['vendoredSha256'] != expected:
-            raise ValueError('Unexpected contract patch or provenance mismatch')
-        for base in [root / 'contracts', root / 'src/contracts']:
-            if hashlib.sha256((base / contract['vendoredPath']).read_bytes()).hexdigest() != expected:
-                raise ValueError('Vendored service contract differs from verified upstream bytes')
     cache = root / '.cache'
     cache.mkdir(exist_ok=True)
     npm = 'npm.cmd' if os.name == 'nt' else 'npm'
@@ -51,6 +43,7 @@ def build_release():
                 files[member.name] = archive.extractfile(member).read()
         for required in ['package/dist/index.js', 'package/wa-plugin.json',
                          'package/node_modules/@wabs/plugin-sdk/dist/command-plugin.js',
+                         'package/node_modules/@wabs/plugin-sdk/dist/host-polls.js',
                          'package/node_modules/@wabs/plugin-sdk/LICENSE',
                          'package/node_modules/zod/LICENSE']:
             if required not in files:

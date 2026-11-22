@@ -211,13 +211,15 @@ test('publication sends one durable introduction before the native poll across r
         botWid: 'bot@c.us', participants: [{ wid: 'fixture@c.us', displayName: 'Fixture actor' }] }),
       sendText: async (_chatId, _text, options) => { calls.push(['introduction', options.idempotencyKey]);
         return { messageId: 'intro-message' }; },
-      services: { call: async request => {
-        if (request.method === 'reconcilePoll') return { status: 'absent' };
-        calls.push(['poll', request.input.idempotencyKey]);
-        publishAttempts += 1;
-        if (publishAttempts === 1) throw new TransportProviderUnavailableError('whatsmeow', 'offline');
-        return { messageId: 'native-poll', acceptedAt: timestamp };
-      } },
+      polls: {
+        reconcile: async () => ({ status: 'absent', providerId: 'whatsmeow' }),
+        publish: async request => {
+          calls.push(['poll', request.input.idempotencyKey]);
+          publishAttempts += 1;
+          if (publishAttempts === 1) throw new TransportProviderUnavailableError('whatsmeow', 'offline');
+          return { messageId: 'native-poll', acceptedAt: timestamp };
+        }
+      },
       enqueuePluginJob: async () => undefined };
     await publishPollRound(ctx, aggregate.poll.id, aggregate.rounds[0].id, () => new Date(timestamp));
     assert.equal(getPollDelivery(db, 'poll-announcement:fixture-round:published')?.status, 'sent',
@@ -226,6 +228,57 @@ test('publication sends one durable introduction before the native poll across r
     await publishPollRound(ctx, aggregate.poll.id, aggregate.rounds[0].id, () => new Date(next));
     assert.deepEqual(calls.map(([kind]) => kind), ['introduction', 'poll', 'poll']);
     assert.equal(getPollAggregate(db, aggregate.poll.id).rounds[0].pollWaMessageId, 'native-poll');
+  } finally { db.close(); }
+});
+
+test('private ballots recover receipts before publishing and reuse the recipient key across retries', async () => {
+  const { claimPollRoundPublication, capturePollElectorate, ensurePollPrivateIssuancesForCapturedElectorate,
+    getPollPrivateIssuance } = require('../dist/store');
+  const { publishPrivatePollIssuance } = require('../dist/privatePublication');
+  const db = open(':memory:'); migrate(db, migrations);
+  try {
+    const { poll } = seed(db);
+    createPoll(db, { definition: { ...poll.definition, id: 'private', ballotDelivery: 'private',
+      electorate: { kind: 'group_members_until_cutoff' } }, scopeId: poll.scopeId, chatId: poll.chatId,
+      creatorIdentityId: poll.creatorIdentityId, creatorWid: poll.creatorWid, creatorLabel: 'Fixture',
+      roundId: 'round-private', publishIdempotencyKey: 'private-key', maxActivePollsPerChat: 10, createdAt: timestamp });
+    const claim = { roundId: 'round-private', claimToken: 'private-claim' };
+    assert.ok(claimPollRoundPublication(db, { ...claim, now: timestamp, leaseExpiresAt: cutoff }));
+    capturePollElectorate(db, { ...claim, capturedAt: timestamp, electorate: [
+      { voterIdentityId: 'already-sent', voterWid: 'first@c.us' }, { voterIdentityId: 'new', voterWid: 'second@c.us' }
+    ] });
+    const issuances = ensurePollPrivateIssuancesForCapturedElectorate(db, { ...claim, createdAt: timestamp });
+    assert.equal(issuances.length, 2);
+    const issued = [];
+    for (const issuance of issuances) {
+      let reconciles = 0;
+      const ctx = { databases: { open: () => db }, audit: { record: async () => {} }, privatePolls: {
+        reconcile: async request => {
+          reconciles++;
+          assert.equal(request.scopeId, poll.scopeId);
+          assert.equal(request.actorIdentityId, poll.creatorIdentityId);
+          assert.equal(request.groupWid, poll.chatId);
+          assert.deepEqual(request.input, { groupWid: poll.chatId, recipientIdentityId: issuance.voterIdentityId,
+            recipientDeliveryChatId: issuance.voterWid, idempotencyKey: issuance.publishIdempotencyKey });
+          return issuance.voterIdentityId === 'already-sent'
+            ? { status: 'found', providerId: 'whatsmeow', messageId: 'previous', remoteChatId: issuance.voterWid, acceptedAt: timestamp }
+            : { status: 'absent', providerId: 'whatsmeow' };
+        },
+        publish: async request => {
+          assert.equal(request.input.idempotencyKey, issuance.publishIdempotencyKey);
+          assert.equal(request.input.recipientDeliveryChatId, issuance.voterWid);
+          assert.equal(request.input.notAfter, cutoff);
+          issued.push(issuance.voterIdentityId);
+          return { messageId: 'published', remoteChatId: issuance.voterWid, acceptedAt: timestamp };
+        }
+      } };
+      await publishPrivatePollIssuance(ctx, issuance.id, () => new Date(timestamp));
+      await publishPrivatePollIssuance(ctx, issuance.id, () => new Date(timestamp));
+      assert.equal(reconciles, 1);
+      assert.equal(getPollPrivateIssuance(db, issuance.id).pollWaMessageId,
+        issuance.voterIdentityId === 'already-sent' ? 'previous' : 'published');
+    }
+    assert.deepEqual(issued, ['new']);
   } finally { db.close(); }
 });
 

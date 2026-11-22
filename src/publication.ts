@@ -8,14 +8,10 @@ import {
   TransportGroupNotFoundError
 } from '@wabs/plugin-sdk/transport-errors';
 import {
-  DOAS_POLL_PUBLISH_METHOD,
-  DOAS_POLL_RECONCILE_METHOD,
-  DOAS_POLL_SERVICE_ID,
-  doasPollPublishInputSchema,
-  doasPollReconcileInputSchema,
-  type DoasPollPublishOutput,
-  type DoasPollReconcileOutput
-} from './contracts/doas-poll-v1';
+  hostPollPublishInputSchema,
+  hostPollReconcileInputSchema,
+  type HostPollReconcileOutput
+} from '@wabs/plugin-sdk/host-polls';
 import type { PollElector } from './domain';
 import { parsePollAssistantConfig } from './config';
 import { POLL_ASSISTANT_PLUGIN_ID } from './database';
@@ -149,17 +145,15 @@ export async function publishPollRound(
       return;
     }
     let publicationStartedAt = sendSnapshot.round.publicationStartedAt;
-    if (!context.services) {
-      throw new Error('Poll publication service registry is unavailable.');
+    if (!context.polls) {
+      throw new Error('Poll publication is unavailable.');
     }
-    const receipt = await context.services.call<DoasPollReconcileOutput>({
-      serviceId: DOAS_POLL_SERVICE_ID,
-      method: DOAS_POLL_RECONCILE_METHOD,
+    const receipt = await context.polls.reconcile({
       scopeId: claim.poll.scopeId,
       actorIdentityId: claim.poll.creatorIdentityId,
       ...(claim.poll.groupId ? { groupId: claim.poll.groupId } : {}),
       groupWid: claim.poll.chatId,
-      input: doasPollReconcileInputSchema.parse({
+      input: hostPollReconcileInputSchema.parse({
         groupWid: sendSnapshot.poll.chatId,
         idempotencyKey: sendSnapshot.round.publishIdempotencyKey
       })
@@ -219,9 +213,7 @@ export async function publishPollRound(
       );
     }
     deliveryAttempted = true;
-    const sent = await context.services.call<DoasPollPublishOutput>({
-      serviceId: DOAS_POLL_SERVICE_ID,
-      method: DOAS_POLL_PUBLISH_METHOD,
+    const sent = await context.polls.publish({
       scopeId: claim.poll.scopeId,
       actorIdentityId: claim.poll.creatorIdentityId,
       ...(claim.poll.groupId ? { groupId: claim.poll.groupId } : {}),
@@ -331,7 +323,7 @@ function canonicalPublishInput(snapshot: StoredPollRoundSnapshot) {
             + closing.deadline.durationMinutes * 60_000
         ).toISOString()
       : undefined;
-    return doasPollPublishInputSchema.parse({
+    return hostPollPublishInputSchema.parse({
       groupWid: snapshot.poll.chatId,
       question: snapshot.round.question,
       options: [...snapshot.options]
@@ -581,7 +573,7 @@ function isTerminalPublicationError(error: unknown): boolean {
 async function persistAcceptedPublication(
   context: PluginRuntimeContext,
   claim: PollPublicationClaim,
-  receipt: DoasPollReconcileOutput,
+  receipt: HostPollReconcileOutput,
   _observedAt: Date,
   options: { deadlineAnchorAt?: string | undefined } = {}
 ): Promise<void> {

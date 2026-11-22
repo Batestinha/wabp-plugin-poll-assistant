@@ -5,12 +5,7 @@ import {
   isTransportProviderUnavailableError
 } from '@wabs/plugin-sdk/transport-errors';
 import { parsePollAssistantConfig } from './config';
-import {
-  DOAS_PRIVATE_POLL_RELEASE_METHOD,
-  DOAS_PRIVATE_POLL_SERVICE_ID,
-  doasPrivatePollReleaseInputSchema,
-  type DoasPrivatePollReleaseOutput
-} from './contracts/doas-poll-v1';
+import { hostPrivatePollReleaseInputSchema } from '@wabs/plugin-sdk/host-polls';
 import { enqueuePollCleanupJob, enqueuePollDeliveryJob, pollRetryAt } from './jobs';
 import {
   POLL_DELIVERY_LEASE_MS,
@@ -136,22 +131,20 @@ export async function cleanupPollBallots(
     return;
   }
   if (aggregate.poll.definition.ballotDelivery === 'private') {
-    if (!context.services) {
-      throw new Error('Private poll vote-history release service is unavailable.');
+    if (!context.privatePolls) {
+      throw new Error('Private poll vote-history release is unavailable.');
     }
     for (const round of aggregate.rounds) {
       for (const issuance of listPollPrivateIssuancesByRound(db, round.id)) {
         if (!issuance.publicationStartedAt) {
           continue;
         }
-        const released = await context.services.call<DoasPrivatePollReleaseOutput>({
-          serviceId: DOAS_PRIVATE_POLL_SERVICE_ID,
-          method: DOAS_PRIVATE_POLL_RELEASE_METHOD,
+        const released = await context.privatePolls.release({
           scopeId: aggregate.poll.scopeId,
           actorIdentityId: aggregate.poll.creatorIdentityId,
           ...(aggregate.poll.groupId ? { groupId: aggregate.poll.groupId } : {}),
           groupWid: aggregate.poll.chatId,
-          input: doasPrivatePollReleaseInputSchema.parse({
+          input: hostPrivatePollReleaseInputSchema.parse({
             groupWid: aggregate.poll.chatId,
             recipientIdentityId: issuance.voterIdentityId,
             recipientDeliveryChatId: issuance.voterWid,
