@@ -112,6 +112,35 @@ test('assistant creation completes after private publication without a group pol
   } finally { db.close(); }
 });
 
+test('assistant creation reports a missing operation as safe to retry and a failed publication as failed', async () => {
+  const db = open(':memory:'); migrate(db, migrations);
+  try {
+    seed(db);
+    db.run('INSERT INTO poll_workflow_operations (operation_id,poll_id,scope_id,actor_identity_id,input_digest) VALUES (?,?,?,?,?)',
+      'group-op', 'fixture-poll', 'fixture-scope', 'fixture-actor', 'a'.repeat(64));
+    const context = { pluginId: plugin.manifest.pluginId, databases: { open: () => db },
+      enabledFor: async () => true, resolveStableIdentityById: async id => ({ identityId: id, canonicalWid: 'fixture@c.us' }),
+      configFor: async () => ({}), i18n: { translatorForScope: async () => t },
+      explainPermission: async () => ({ allowed: true }),
+      platform: { transport: { getGroupCapabilities: async () => ({ botIsAdmin: true, canSend: true }) } } };
+    const inspect = registerPollCreateAction(context).methods.find(method => method.name === 'inspect').handler;
+    const call = { scopeId: 'fixture-scope', actorIdentityId: 'fixture-actor', groupWid: 'fixture@g.us' };
+    // A crash before execute committed the poll leaves no record: the host may execute again.
+    assert.deepEqual(await inspect({ operationId: 'never-started' }, call),
+      { status: 'failed', reason: pt['official.poll-assistant.outcome.notStarted'], retryable: true });
+    assert.equal((await inspect({ operationId: 'group-op' }, call)).status, 'pending');
+    // A publication that failed for good is final, with the text the group was told.
+    db.run("UPDATE poll_rounds SET status = 'failed' WHERE id = ?", 'fixture-round');
+    db.run("UPDATE polls SET status = 'failed' WHERE id = ?", 'fixture-poll');
+    assert.deepEqual(await inspect({ operationId: 'group-op' }, call), { status: 'failed', retryable: false,
+      reason: t('official.poll-assistant.failure.publication', { question: 'Manhã ou tarde?', pollId: 'fixture-poll' }) });
+    db.run(`INSERT INTO poll_deliveries (id, poll_id, round_id, kind, delivery_key, chat_id, text, idempotency_key, status, attempt, created_at, updated_at)
+      VALUES (?, ?, ?, 'failure', ?, ?, ?, ?, 'sent', 1, ?, ?)`, 'poll-publication-failure:fixture-round', 'fixture-poll', 'fixture-round',
+      'publication-failure:fixture-round:v1', 'fixture@g.us', 'Não foi confirmada.', 'fixture-failure', timestamp, timestamp);
+    assert.equal((await inspect({ operationId: 'group-op' }, call)).reason, 'Não foi confirmada.');
+  } finally { db.close(); }
+});
+
 test('new count polls reject zero while legacy stored zero values remain readable', () => {
   const db = open(':memory:'); migrate(db, migrations);
   try {
