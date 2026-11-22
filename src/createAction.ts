@@ -6,7 +6,7 @@ import { canonicalJson, workflowDigest, preparedActionSchema, workflowActionResu
 import { parsePollAssistantConfig } from './config';
 import { POLL_CREATE_ACTION_SERVICE, pollCreateAction, pollCreateActionInputSchema, pollCreateActionDraftInputSchema } from './createActionApi';
 import { flowPreferences, resolvePollCreationPreset } from './commands';
-import { createPoll, getPollAggregate, pollsDatabase } from './store';
+import { createPoll, getPollAggregate, getPollDelivery, pollsDatabase } from './store';
 import { enqueuePollPublishJob } from './jobs';
 import { canonicalPollOutcomeProgram, freezePollOutcome, renderPollOutcomeProgram, pollOutcomeResultSchema } from './outcomeConfig';
 import { pollConfigurationValues, renderPollConfiguration } from './announcements';
@@ -234,15 +234,26 @@ async function inspectOperation(context: PluginServiceRegistrationContext, opera
   const current = await requester(context, call);
   const db = pollsDatabase(context.databases);
   const row = db.get<{ poll_id: string }>('SELECT poll_id FROM poll_workflow_operations WHERE operation_id = ? AND scope_id = ? AND actor_identity_id = ?', operationId, call.scopeId, call.actorIdentityId!);
-  if (!row) return { status: 'blocked', reason: current.t('official.poll-assistant.outcome.unavailable'), retryable: false };
+  // No record means execute never committed the poll (for example a crash
+  // before it did). Executing again is safe: the poll and its publication are
+  // keyed by this operation ID.
+  if (!row) return { status: 'failed', reason: current.t('official.poll-assistant.outcome.notStarted'), retryable: true };
   const aggregate = getPollAggregate(db, row.poll_id)!;
   const round = aggregate.rounds[0]!;
   if (aggregate.poll.status === 'cancelled') return { status: 'blocked', reason: current.t('official.poll-assistant.outcome.status.cancelled'), retryable: false };
   // Private ballots have individual message IDs, not a group poll message ID.
   const published = Boolean(round.publishedAt && (round.pollWaMessageId || aggregate.poll.definition.ballotDelivery === 'private'));
-  return published
-    ? { status: 'completed', output: { pollId: aggregate.poll.id, roundId: round.id,
+  if (published) {
+    return { status: 'completed', output: { pollId: aggregate.poll.id, roundId: round.id,
       ...(round.pollWaMessageId ? { messageId: round.pollWaMessageId } : {}) },
-      summary: current.t('official.poll-assistant.outcome.created', { question: aggregate.poll.definition.question, pollId: aggregate.poll.id }) }
-    : { status: 'pending', operationId, summary: current.t('official.poll-assistant.outcome.publicationPending') };
+      summary: current.t('official.poll-assistant.outcome.created', { question: aggregate.poll.definition.question, pollId: aggregate.poll.id }) };
+  }
+  // A publication that failed for good never becomes pending again. Report the
+  // same text the group was told, so the requester learns the real outcome.
+  if (round.status === 'failed' || aggregate.poll.status === 'failed') {
+    const notice = getPollDelivery(db, `poll-publication-failure:${round.id}`)?.text?.trim();
+    return { status: 'failed', retryable: false, reason: notice || current.t('official.poll-assistant.failure.publication', {
+      question: aggregate.poll.definition.question, pollId: aggregate.poll.id }) };
+  }
+  return { status: 'pending', operationId, summary: current.t('official.poll-assistant.outcome.publicationPending') };
 }

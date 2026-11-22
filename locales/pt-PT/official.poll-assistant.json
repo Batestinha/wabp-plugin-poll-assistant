@@ -245,6 +245,7 @@
   "official.poll-assistant.outcome.createRules": "Objetivo: {purpose}\nRegra: {rule}\nFecho: {closing}\nQuórum: {quorum}\nEmpate: {tie}\nQuem pode votar: {electorate}\nEntrega do boletim: {delivery}\nIdentificação dos votantes: {disclosure}",
   "official.poll-assistant.outcome.created": "Publicada «{question}». Votação: {pollId}.",
   "official.poll-assistant.outcome.publicationPending": "Votação guardada; publicação pendente.",
+  "official.poll-assistant.outcome.notStarted": "A votação ainda não foi criada.",
   "official.poll-assistant.outcome.electorate.members_at_publication": "Membros do grupo na abertura da votação",
   "official.poll-assistant.outcome.electorate.group_members_until_cutoff": "Membros do grupo até ao fecho",
   "official.poll-assistant.outcome.electorate.actor": "O requerente",

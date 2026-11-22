@@ -8,7 +8,7 @@
   },
   "description": "Durable WhatsApp polls for decisions, response measurement, and structured quantity totals.",
   "kind": "managed_group",
-  "version": "0.7.14",
+  "version": "0.7.15",
   "coreApiRange": "^0.3.10",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",

@@ -6,6 +6,7 @@ export const pollOutcomeMessages: MessageCatalog = {
   "official.poll-assistant.outcome.createRules": "Purpose: {purpose}\nRule: {rule}\nClosing: {closing}\nQuorum: {quorum}\nTie: {tie}\nWho can vote: {electorate}\nBallot delivery: {delivery}\nVoter disclosure: {disclosure}",
   "official.poll-assistant.outcome.created": "Published “{question}”. Poll: {pollId}.",
   "official.poll-assistant.outcome.publicationPending": "Poll saved; publication is pending.",
+  "official.poll-assistant.outcome.notStarted": "The poll was not created yet.",
   "official.poll-assistant.outcome.electorate.members_at_publication": "Group members when voting opens",
   "official.poll-assistant.outcome.electorate.group_members_until_cutoff": "Group members up to the cutoff",
   "official.poll-assistant.outcome.electorate.actor": "The requester",
