@@ -1,5 +1,5 @@
 {
-  "official.poll-assistant.description": "Crie, publique, encerre e interprete sondagens duradouras no WhatsApp.",
+  "official.poll-assistant.description": "Gere sondagens no WhatsApp para tomar decisões, recolher respostas e somar quantidades. Os organizadores podem enviar boletins para o grupo ou em privado, escolher como divulgar os resultados e acionar tarefas configuradas.",
   "official.poll-assistant.assistant.summary": "Sondagens duradouras e guiadas no WhatsApp com predefinições do operador, resultados agregados e gestão confirmada do ciclo de vida.",
   "official.poll-assistant.assistant.workflow.create": "Inicie o fluxo guiado de configuração de uma sondagem para Decidir, Medir ou Contabilizar, usando uma predefinição escolhida pelo operador quando disponível.",
   "official.poll-assistant.assistant.workflow.inspect": "Liste as sondagens no grupo de origem e obtenha resultados agregados; as contagens de uma sondagem aberta só ficam disponíveis quando o operador as ativa.",
@@ -179,7 +179,7 @@
   "official.poll-assistant.round.failed": "Falhou",
   "official.poll-assistant.help.family": "Assistente de Sondagens",
   "official.poll-assistant.help.feature.title": "Assistente de Sondagens",
-  "official.poll-assistant.help.feature.summary": "Crie sondagens duradouras para decisões, medições e quantidades.",
+  "official.poll-assistant.help.feature.summary": "Crie uma sondagem, vote no grupo ou em privado e acompanhe os resultados ou as ações configuradas para o fecho da votação.",
   "official.poll-assistant.help.create": "Inicie o fluxo guiado de criação de sondagens.",
   "official.poll-assistant.help.create.example": "Exemplo: /poll create",
   "official.poll-assistant.help.list": "Liste as sondagens do grupo de origem.",
