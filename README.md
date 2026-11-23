@@ -2,7 +2,7 @@
 
 Runs WhatsApp polls for decisions, surveys and quantity totals. Organizers can send ballots to a group or privately, choose how results are shared, and trigger configured follow-up actions.
 
-Standalone WABS package `official.poll-assistant` version `0.7.16`, requiring WABP core API `^0.3.27`. It preserves the plugin ID, account-owned `polls` database, scoped settings, creation recipes, queue keys and receipt formats. Data version 9 adds durable pin and close-edit lifecycle state. Existing queued messages retain their text and recipients. Deploy a compatible reader before enabling new producers; an application downgrade must preserve writes accepted by the newer release.
+WABS distributes this plugin as `official.poll-assistant`. The version and required WABP core API are listed in `wa-plugin.json`. It preserves the plugin ID, account-owned `polls` database, scoped settings, creation recipes, queue keys and receipt formats. Data version 9 adds durable pin and close-edit lifecycle state. Existing queued messages retain their text and recipients. Deploy a compatible reader before enabling new producers; an application downgrade must preserve writes accepted by the newer release.
 
 Scope clocks supply default timezones. Existing UTC deadlines remain fixed. Poll messages use the original cutoff, even when result delivery is delayed. Templates support localized defaults, validation, conditional sections and pagination. Voter names only appear for named ballots; result names do not generate notification mentions.
 
