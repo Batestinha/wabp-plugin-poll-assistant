@@ -5,7 +5,7 @@ import { pollOutcomeMessages } from './outcomeMessages';
 export const pollAssistantMessages: MessageCatalog = {
   ...pollOutcomeMessages,
   ...pollTemplateDefaultMessages,
-  'official.poll-assistant.description': 'Create, publish, close, and interpret durable WhatsApp polls.',
+  'official.poll-assistant.description': 'Runs WhatsApp polls for decisions, surveys and quantity totals. Organizers can send ballots to a group or privately, choose how results are shared, and trigger configured follow-up actions.',
   'official.poll-assistant.assistant.summary': 'Guided durable WhatsApp polls with operator presets, aggregate results, and confirmed lifecycle management.',
   'official.poll-assistant.assistant.workflow.create': 'Start the guided Decide, Measure, or Tally setup flow, using an operator-selected poll preset when available.',
   'official.poll-assistant.assistant.workflow.inspect': 'List polls in the originating group and retrieve aggregate results; open-poll tallies are available only when enabled by the operator.',
@@ -190,7 +190,7 @@ export const pollAssistantMessages: MessageCatalog = {
   'official.poll-assistant.round.failed': 'Failed',
   'official.poll-assistant.help.family': 'Poll Assistant',
   'official.poll-assistant.help.feature.title': 'Poll Assistant',
-  'official.poll-assistant.help.feature.summary': 'Create durable decision, measurement, and quantity polls.',
+  'official.poll-assistant.help.feature.summary': 'Create a poll, vote in the group or privately, and follow the results or configured actions when voting closes.',
   'official.poll-assistant.help.create': 'Start the guided poll creation flow.',
   'official.poll-assistant.help.create.example': '/poll create',
   'official.poll-assistant.help.list': 'List polls from the originating group.',
