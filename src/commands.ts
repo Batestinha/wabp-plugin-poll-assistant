@@ -1,3 +1,4 @@
+import { withMessageSlot } from './messageSlot';
 import { renderPollTemplateFragment } from './templates';
 import { resolvePollMessage } from './templateDelivery';
 import { createHash } from 'node:crypto';
@@ -604,48 +605,48 @@ function pollCreationTerminalReply(
 ): { text: string; idempotencySuffix: string } {
   switch (decision.outcome) {
     case 'cancelled':
-      return { text: t('official.poll-assistant.flowCancelled'), idempotencySuffix: 'cancelled' };
+      return { text: t('official.poll-assistant.flowCancelled'), ...withMessageSlot('official.poll-assistant.flowCancelled'), idempotencySuffix: 'cancelled' };
     case 'invalid':
-      return { text: t('official.poll-assistant.flowInvalid'), idempotencySuffix: 'invalid' };
+      return { text: t('official.poll-assistant.flowInvalid'), ...withMessageSlot('official.poll-assistant.flowInvalid'), idempotencySuffix: 'invalid' };
     case 'runtime_unavailable':
       return {
-        text: t('official.poll-assistant.runtimeUnavailable'),
+        text: t('official.poll-assistant.runtimeUnavailable'), ...withMessageSlot('official.poll-assistant.runtimeUnavailable'),
         idempotencySuffix: 'runtime-unavailable'
       };
     case 'platform_disabled':
-      return { text: t('official.poll-assistant.disabled'), idempotencySuffix: 'platform-disabled' };
+      return { text: t('official.poll-assistant.disabled'), ...withMessageSlot('official.poll-assistant.disabled'), idempotencySuffix: 'platform-disabled' };
     case 'creation_disabled':
       return {
-        text: t('official.poll-assistant.creationDisabled'),
+        text: t('official.poll-assistant.creationDisabled'), ...withMessageSlot('official.poll-assistant.creationDisabled'),
         idempotencySuffix: 'creation-disabled'
       };
     case 'closing_invalid':
       return {
         text: t('official.poll-assistant.completionClosingInvalid', {
           maximumMinutes: requiredPollCreationDecisionMaximum(decision)
-        }),
+        }), ...withMessageSlot('official.poll-assistant.completionClosingInvalid'),
         idempotencySuffix: 'closing-invalid'
       };
     case 'identity_unavailable':
       return {
-        text: t('official.poll-assistant.identityUnavailable'),
+        text: t('official.poll-assistant.identityUnavailable'), ...withMessageSlot('official.poll-assistant.identityUnavailable'),
         idempotencySuffix: 'identity-unavailable'
       };
     case 'permission_denied':
       return {
-        text: t('official.poll-assistant.permissionDenied'),
+        text: t('official.poll-assistant.permissionDenied'), ...withMessageSlot('official.poll-assistant.permissionDenied'),
         idempotencySuffix: 'permission-denied'
       };
     case 'capability_unavailable':
       return {
-        text: t('official.poll-assistant.botCapabilityUnavailable'),
+        text: t('official.poll-assistant.botCapabilityUnavailable'), ...withMessageSlot('official.poll-assistant.botCapabilityUnavailable'),
         idempotencySuffix: 'capability-unavailable'
       };
     case 'active_limit':
       return {
         text: t('official.poll-assistant.activeLimitReached', {
           maximum: requiredPollCreationDecisionMaximum(decision)
-        }),
+        }), ...withMessageSlot('official.poll-assistant.activeLimitReached'),
         idempotencySuffix: 'active-limit'
       };
   }
@@ -693,22 +694,22 @@ async function startPollCreation(context: PluginCommandContext, ctx: CommandCont
   const scopeId = requireScopeId(ctx);
   const actor = ctx.actor?.identityAddress;
   if (!actor?.identityId) {
-    return { handled: true, text: ctx.t('official.poll-assistant.identityUnavailable') };
+    return { handled: true, text: ctx.t('official.poll-assistant.identityUnavailable'), ...withMessageSlot('official.poll-assistant.identityUnavailable') };
   }
   const originGroupWid = currentGroupWid(ctx);
   if (!originGroupWid) {
-    return { handled: true, text: ctx.t('official.poll-assistant.groupRequired') };
+    return { handled: true, text: ctx.t('official.poll-assistant.groupRequired'), ...withMessageSlot('official.poll-assistant.groupRequired') };
   }
   const config = parsePollAssistantConfig(await runtime.configFor(scopeId, actor.identityId));
   if (!config.allowCreation) {
-    return { handled: true, text: ctx.t('official.poll-assistant.creationDisabled') };
+    return { handled: true, text: ctx.t('official.poll-assistant.creationDisabled'), ...withMessageSlot('official.poll-assistant.creationDisabled') };
   }
   const requestedPresetId = commandArgs(ctx)[0]?.trim();
   const preset = resolvePollCreationPreset(config, requestedPresetId);
   if (preset.kind === 'not_found') {
     return { handled: true, text: ctx.t('official.poll-assistant.presetNotFound', {
       presetId: preset.presetId
-    }) };
+    }), ...withMessageSlot('official.poll-assistant.presetNotFound') };
   }
   const preferences = flowPreferences(config, preset.preset);
   const starter = new PollCreationFlowStarter({
@@ -742,7 +743,7 @@ async function startPollCreation(context: PluginCommandContext, ctx: CommandCont
         : 'official.poll-assistant.startedPrivate')
     };
   } catch {
-    return { handled: true, text: ctx.t('official.poll-assistant.startFailed') };
+    return { handled: true, text: ctx.t('official.poll-assistant.startFailed'), ...withMessageSlot('official.poll-assistant.startFailed') };
   }
 }
 
@@ -751,12 +752,12 @@ async function listPolls(context: PluginCommandContext, ctx: CommandContext) {
   const scopeId = requireScopeId(ctx);
   const groupWid = currentGroupWid(ctx);
   if (!groupWid) {
-    return { handled: true, text: ctx.t('official.poll-assistant.groupRequired') };
+    return { handled: true, text: ctx.t('official.poll-assistant.groupRequired'), ...withMessageSlot('official.poll-assistant.groupRequired') };
   }
   const polls = listPollsByChat(pollsDatabase(runtime.databases), groupWid, POLL_LIST_LIMIT)
     .filter((poll) => poll.scopeId === scopeId);
   if (polls.length === 0) {
-    return { handled: true, text: ctx.t('official.poll-assistant.list.none') };
+    return { handled: true, text: ctx.t('official.poll-assistant.list.none'), ...withMessageSlot('official.poll-assistant.list.none') };
   }
   return {
     handled: true,
@@ -768,7 +769,7 @@ async function listPolls(context: PluginCommandContext, ctx: CommandContext) {
         status: pollStatusLabel(poll, ctx.t),
         pollId: poll.id
       })).join('\n')
-    })
+    }), ...withMessageSlot('official.poll-assistant.list.result')
   };
 }
 
@@ -800,7 +801,7 @@ async function pollStatus(context: PluginCommandContext, ctx: CommandContext) {
           optionId: option.id
         })).join('\n'),
       pollId: lookup.aggregate.poll.id
-    })
+    }), ...withMessageSlot('official.poll-assistant.status.result')
   };
 }
 
@@ -831,11 +832,11 @@ export async function closePoll(context: PluginCommandContext, ctx: CommandConte
     selection.aggregate.poll.id
   );
   if (!aggregate || !await canManagePoll(context, ctx, aggregate.poll)) {
-    return { handled: true, text: ctx.t('official.poll-assistant.lifecyclePermissionDenied') };
+    return { handled: true, text: ctx.t('official.poll-assistant.lifecyclePermissionDenied'), ...withMessageSlot('official.poll-assistant.lifecyclePermissionDenied') };
   }
   const round = latestRound(aggregate);
   if (!round || !isManuallyClosablePoll(aggregate)) {
-    return { handled: true, text: ctx.t('official.poll-assistant.close.notOpen') };
+    return { handled: true, text: ctx.t('official.poll-assistant.close.notOpen'), ...withMessageSlot('official.poll-assistant.close.notOpen') };
   }
   const close = await requestPollClose({
     context,
@@ -843,7 +844,7 @@ export async function closePoll(context: PluginCommandContext, ctx: CommandConte
     aggregate
   });
   if (close.kind === 'not_open') {
-    return { handled: true, text: ctx.t('official.poll-assistant.close.notOpen') };
+    return { handled: true, text: ctx.t('official.poll-assistant.close.notOpen'), ...withMessageSlot('official.poll-assistant.close.notOpen') };
   }
   return { handled: true };
 }
@@ -935,7 +936,7 @@ async function openPoll(context: PluginCommandContext, ctx: CommandContext) {
     polls: selection.candidates.map((aggregate) => ctx.t('official.poll-assistant.manage.choice', {
       question: aggregate.poll.definition.question, pollId: aggregate.poll.id
     })).join('\n')
-  }) };
+  }), ...withMessageSlot('official.poll-assistant.manage.choose') };
   if (!args.includes('--confirm')) return confirmationReply(ctx, 'open', selection.aggregate);
   const actorIdentityId = ctx.actor?.identityAddress.identityId;
   const aggregate = getPollAggregate(
@@ -944,13 +945,13 @@ async function openPoll(context: PluginCommandContext, ctx: CommandContext) {
   );
   const round = aggregate ? latestRound(aggregate) : undefined;
   if (!actorIdentityId || !aggregate || !round) {
-    return { handled: true, text: ctx.t('official.poll-assistant.identityUnavailable') };
+    return { handled: true, text: ctx.t('official.poll-assistant.identityUnavailable'), ...withMessageSlot('official.poll-assistant.identityUnavailable') };
   }
   if (!isScheduleDeferredPoll(aggregate)) {
-    return { handled: true, text: ctx.t('official.poll-assistant.open.unavailable') };
+    return { handled: true, text: ctx.t('official.poll-assistant.open.unavailable'), ...withMessageSlot('official.poll-assistant.open.unavailable') };
   }
   if (!await canManagePoll(context, ctx, aggregate.poll)) {
-    return { handled: true, text: ctx.t('official.poll-assistant.lifecyclePermissionDenied') };
+    return { handled: true, text: ctx.t('official.poll-assistant.lifecyclePermissionDenied'), ...withMessageSlot('official.poll-assistant.lifecyclePermissionDenied') };
   }
   const overriddenAt = new Date();
   const result = overridePollWorkingHours(pollsDatabase(runtime.databases), {
@@ -960,7 +961,7 @@ async function openPoll(context: PluginCommandContext, ctx: CommandContext) {
     overriddenAt: overriddenAt.toISOString()
   });
   if (result === 'unavailable') {
-    return { handled: true, text: ctx.t('official.poll-assistant.open.unavailable') };
+    return { handled: true, text: ctx.t('official.poll-assistant.open.unavailable'), ...withMessageSlot('official.poll-assistant.open.unavailable') };
   }
   if (result === 'publication') {
     await enqueuePollPublishJob(context, {
@@ -983,7 +984,7 @@ async function openPoll(context: PluginCommandContext, ctx: CommandContext) {
   }
   return {
     handled: true,
-    text: ctx.t('official.poll-assistant.open.done', { pollId: aggregate.poll.id })
+    text: ctx.t('official.poll-assistant.open.done', { pollId: aggregate.poll.id }), ...withMessageSlot('official.poll-assistant.open.done')
   };
 }
 
@@ -1018,7 +1019,7 @@ async function selectManageablePoll(
 ): Promise<ManageablePollSelection> {
   const groupWid = currentGroupWid(ctx);
   if (!groupWid) {
-    return { kind: 'reply', text: ctx.t('official.poll-assistant.groupRequired') };
+    return { kind: 'reply', text: ctx.t('official.poll-assistant.groupRequired'), ...withMessageSlot('official.poll-assistant.groupRequired') };
   }
   const aggregates = listPollsByChat(pollsDatabase(runtime.databases), groupWid, POLL_LIST_LIMIT)
     .filter((poll) => poll.scopeId === requireScopeId(ctx))
@@ -1053,7 +1054,7 @@ async function selectManageablePoll(
   if (candidates.length === 0) {
     return {
       kind: 'reply',
-      text: ctx.t('official.poll-assistant.manage.none', { target: target || '—' })
+      text: ctx.t('official.poll-assistant.manage.none', { target: target || '—' }), ...withMessageSlot('official.poll-assistant.manage.none')
     };
   }
   if (guidedSelection) return { kind: 'choose', candidates };
@@ -1064,7 +1065,7 @@ async function selectManageablePoll(
         question: aggregate.poll.definition.question,
         pollId: aggregate.poll.id
       })).join('\n')
-    })
+    }), ...withMessageSlot('official.poll-assistant.manage.choose')
   };
 }
 
@@ -1080,7 +1081,7 @@ function confirmationReply(
       question: aggregate.poll.definition.question,
       pollId: aggregate.poll.id,
       command: `/poll ${action} ${aggregate.poll.id} --confirm`
-    })
+    }), ...withMessageSlot('official.poll-assistant.manage.confirm')
   };
 }
 
@@ -1088,24 +1089,24 @@ async function cancelPollLifecycle(context: PluginCommandContext, ctx: CommandCo
   const runtime = requireOfficialCommandRuntime(context);
   const args = commandArgs(ctx);
   if (!args.includes('--confirm')) {
-    return { handled: true, text: ctx.t('official.poll-assistant.confirmRequired') };
+    return { handled: true, text: ctx.t('official.poll-assistant.confirmRequired'), ...withMessageSlot('official.poll-assistant.confirmRequired') };
   }
   const lookup = lookupPollForCurrentGroup(runtime.databases, ctx);
   if (lookup.kind !== 'found') {
     return { handled: true, text: lookup.text };
   }
   if (!await canManagePoll(context, ctx, lookup.aggregate.poll)) {
-    return { handled: true, text: ctx.t('official.poll-assistant.lifecyclePermissionDenied') };
+    return { handled: true, text: ctx.t('official.poll-assistant.lifecyclePermissionDenied'), ...withMessageSlot('official.poll-assistant.lifecyclePermissionDenied') };
   }
   const actor = ctx.actor?.identityAddress;
   if (!actor?.identityId) {
-    return { handled: true, text: ctx.t('official.poll-assistant.identityUnavailable') };
+    return { handled: true, text: ctx.t('official.poll-assistant.identityUnavailable'), ...withMessageSlot('official.poll-assistant.identityUnavailable') };
   }
   const round = latestRound(lookup.aggregate);
   if (!round) {
     return { handled: true, text: ctx.t('official.poll-assistant.cancel.unavailable', {
       pollId: lookup.aggregate.poll.id
-    }) };
+    }), ...withMessageSlot('official.poll-assistant.cancel.unavailable') };
   }
   const groupT = await context.i18n.translatorForScope(lookup.aggregate.poll.scopeId);
   const deliveryId = `poll-assistant:cancel:${lookup.aggregate.poll.id}`;
@@ -1134,12 +1135,12 @@ async function cancelPollLifecycle(context: PluginCommandContext, ctx: CommandCo
     }
     return { handled: true, text: ctx.t('official.poll-assistant.tieDeliveryPending', {
       pollId: lookup.aggregate.poll.id
-    }) };
+    }), ...withMessageSlot('official.poll-assistant.tieDeliveryPending') };
   }
   if (!cancelled) {
     return { handled: true, text: ctx.t('official.poll-assistant.cancel.unavailable', {
       pollId: lookup.aggregate.poll.id
-    }) };
+    }), ...withMessageSlot('official.poll-assistant.cancel.unavailable') };
   }
   const delivery = getPollDelivery(pollsDatabase(runtime.databases), deliveryId);
   if (!delivery) {
@@ -1154,7 +1155,7 @@ async function cancelPollLifecycle(context: PluginCommandContext, ctx: CommandCo
   });
   return {
     handled: true,
-    text: ctx.t('official.poll-assistant.cancel.done', { pollId: lookup.aggregate.poll.id })
+    text: ctx.t('official.poll-assistant.cancel.done', { pollId: lookup.aggregate.poll.id }), ...withMessageSlot('official.poll-assistant.cancel.done')
   };
 }
 
@@ -1162,27 +1163,27 @@ async function resolvePollLifecycleTie(context: PluginCommandContext, ctx: Comma
   const runtime = requireOfficialCommandRuntime(context);
   const args = commandArgs(ctx);
   if (!args.includes('--confirm')) {
-    return { handled: true, text: ctx.t('official.poll-assistant.confirmRequired') };
+    return { handled: true, text: ctx.t('official.poll-assistant.confirmRequired'), ...withMessageSlot('official.poll-assistant.confirmRequired') };
   }
   const lookup = lookupPollForCurrentGroup(runtime.databases, ctx);
   if (lookup.kind !== 'found') {
     return { handled: true, text: lookup.text };
   }
   if (!await canManagePoll(context, ctx, lookup.aggregate.poll)) {
-    return { handled: true, text: ctx.t('official.poll-assistant.lifecyclePermissionDenied') };
+    return { handled: true, text: ctx.t('official.poll-assistant.lifecyclePermissionDenied'), ...withMessageSlot('official.poll-assistant.lifecyclePermissionDenied') };
   }
   const definition = lookup.aggregate.poll.definition;
   if (definition.purpose !== 'decide' || definition.tiePolicy.kind !== 'authorized_choice') {
     return { handled: true, text: ctx.t('official.poll-assistant.resolve.notAuthorizedPolicy', {
       pollId: lookup.aggregate.poll.id
-    }) };
+    }), ...withMessageSlot('official.poll-assistant.resolve.notAuthorizedPolicy') };
   }
   const round = latestRound(lookup.aggregate);
   const result = round ? getPollResult(pollsDatabase(runtime.databases), round.id) : undefined;
   if (!round || round.status !== 'tie_pending' || result?.purpose !== 'decide' || result.outcome.status !== 'tie') {
     return { handled: true, text: ctx.t('official.poll-assistant.resolve.notPending', {
       pollId: lookup.aggregate.poll.id
-    }) };
+    }), ...withMessageSlot('official.poll-assistant.resolve.notPending') };
   }
   const tieOutcome = result.outcome;
   const tiedOptions = definition.options.filter((option) => tieOutcome.tiedOptionIds.includes(option.id));
@@ -1199,7 +1200,7 @@ async function resolvePollLifecycleTie(context: PluginCommandContext, ctx: Comma
     return { handled: true, text: ctx.t('official.poll-assistant.resolve.invalidSelection', {
       count: tieOutcome.remainingSeats,
       options: renderedTiedOptions
-    }) };
+    }), ...withMessageSlot('official.poll-assistant.resolve.invalidSelection') };
   }
   const selectedIds = references.flatMap((reference) => {
     const option = resolveTiedOptionReference(tiedOptions, reference);
@@ -1214,11 +1215,11 @@ async function resolvePollLifecycleTie(context: PluginCommandContext, ctx: Comma
     return { handled: true, text: ctx.t('official.poll-assistant.resolve.invalidSelection', {
       count: tieOutcome.remainingSeats,
       options: renderedTiedOptions
-    }) };
+    }), ...withMessageSlot('official.poll-assistant.resolve.invalidSelection') };
   }
   const actor = ctx.actor?.identityAddress;
   if (!actor?.identityId) {
-    return { handled: true, text: ctx.t('official.poll-assistant.identityUnavailable') };
+    return { handled: true, text: ctx.t('official.poll-assistant.identityUnavailable'), ...withMessageSlot('official.poll-assistant.identityUnavailable') };
   }
   const finalSelectedOptionIds = new Set([
     ...tieOutcome.certainOptionIds,
@@ -1261,7 +1262,7 @@ async function resolvePollLifecycleTie(context: PluginCommandContext, ctx: Comma
     }
     return { handled: true, text: ctx.t('official.poll-assistant.tieDeliveryPending', {
       pollId: lookup.aggregate.poll.id
-    }) };
+    }), ...withMessageSlot('official.poll-assistant.tieDeliveryPending') };
   }
   const delivery = getPollDelivery(pollsDatabase(runtime.databases), deliveryId);
   if (!delivery) {
@@ -1276,7 +1277,7 @@ async function resolvePollLifecycleTie(context: PluginCommandContext, ctx: Comma
   });
   return {
     handled: true,
-    text: ctx.t('official.poll-assistant.resolve.done', { pollId: lookup.aggregate.poll.id })
+    text: ctx.t('official.poll-assistant.resolve.done', { pollId: lookup.aggregate.poll.id }), ...withMessageSlot('official.poll-assistant.resolve.done')
   };
 }
 
@@ -1302,11 +1303,11 @@ function lookupPollForCurrentGroup(
 ): { kind: 'found'; aggregate: StoredPollAggregate } | { kind: 'reply'; text: string } {
   const pollId = commandArgs(ctx).find((arg) => arg !== '--confirm')?.trim();
   if (!pollId) {
-    return { kind: 'reply', text: ctx.t('official.poll-assistant.pollIdRequired') };
+    return { kind: 'reply', text: ctx.t('official.poll-assistant.pollIdRequired'), ...withMessageSlot('official.poll-assistant.pollIdRequired') };
   }
   const groupWid = currentGroupWid(ctx);
   if (!groupWid) {
-    return { kind: 'reply', text: ctx.t('official.poll-assistant.groupRequired') };
+    return { kind: 'reply', text: ctx.t('official.poll-assistant.groupRequired'), ...withMessageSlot('official.poll-assistant.groupRequired') };
   }
   const lookup = lookupPollForGroup({
     databases,
@@ -1315,10 +1316,10 @@ function lookupPollForCurrentGroup(
     pollId
   });
   if (lookup.kind === 'not_found') {
-    return { kind: 'reply', text: ctx.t('official.poll-assistant.notFound', { pollId }) };
+    return { kind: 'reply', text: ctx.t('official.poll-assistant.notFound', { pollId }), ...withMessageSlot('official.poll-assistant.notFound') };
   }
   if (lookup.kind === 'wrong_group') {
-    return { kind: 'reply', text: ctx.t('official.poll-assistant.wrongOriginGroup', { pollId }) };
+    return { kind: 'reply', text: ctx.t('official.poll-assistant.wrongOriginGroup', { pollId }), ...withMessageSlot('official.poll-assistant.wrongOriginGroup') };
   }
   return { kind: 'found', aggregate: lookup.aggregate };
 }

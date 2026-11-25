@@ -1,3 +1,4 @@
+import { withMessageSlot } from './messageSlot';
 import { createHash } from 'node:crypto';
 import { registerPollCreateAction } from './createAction';
 import type { PluginServiceRegistration } from '@wabs/plugin-sdk/services';
@@ -440,7 +441,7 @@ async function cancelAutomatedPoll(
         text: t('official.poll-assistant.delivery.cancelled', {
           question: aggregate.poll.definition.question,
           pollId: aggregate.poll.id
-        }),
+        }), ...withMessageSlot('official.poll-assistant.delivery.cancelled'),
         idempotencyKey: deliveryId
       },
       cancelledAt

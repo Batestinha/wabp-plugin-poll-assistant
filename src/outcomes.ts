@@ -1,3 +1,4 @@
+import { withMessageSlot } from './messageSlot';
 import { type DurableFlowEngine as FlowEngine } from '@wabs/plugin-sdk/durable-flow';
 import type { PluginRuntimeContext } from './runtime';
 import { type PluginCommandContext } from './runtime';
@@ -111,16 +112,16 @@ export async function pollActionsCommand(context: PluginCommandContext, ctx: Com
   const actorIdentityId = ctx.actor?.identityAddress.identityId;
   const engine = context.flowEngine;
   const aggregate = pollId ? getPollAggregate(pollsDatabase(context.databases), pollId) : undefined;
-  if (!aggregate || aggregate.poll.scopeId !== ctx.scopeId || (ctx.groupWid && aggregate.poll.chatId !== ctx.groupWid) || !actorIdentityId) return { handled: true, text: ctx.t('official.poll-assistant.outcome.unavailable') };
+  if (!aggregate || aggregate.poll.scopeId !== ctx.scopeId || (ctx.groupWid && aggregate.poll.chatId !== ctx.groupWid) || !actorIdentityId) return { handled: true, text: ctx.t('official.poll-assistant.outcome.unavailable'), ...withMessageSlot('official.poll-assistant.outcome.unavailable') };
   const db = pollsDatabase(context.databases);
   const config = getPollOutcomeConfiguration(db, aggregate.poll.id);
   const handoff = db.get<{ workflow_run_id: string | null }>('SELECT workflow_run_id FROM poll_outcome_handoffs WHERE poll_id = ?', aggregate.poll.id);
   let run = handoff?.workflow_run_id ? await engine.workflowRuns.get(handoff.workflow_run_id) : undefined;
-  if (!config) return { handled: true, text: ctx.t('official.poll-assistant.outcome.none') };
+  if (!config) return { handled: true, text: ctx.t('official.poll-assistant.outcome.none'), ...withMessageSlot('official.poll-assistant.outcome.none') };
   // Consequences are public; only the original requester can change their execution.
   const action = args[1] ?? 'status';
-  if (action !== 'status' && config.requesterIdentityId !== actorIdentityId) return { handled: true, text: ctx.t('official.poll-assistant.outcome.requesterOnly') };
-  if (!run) return { handled: true, text: ctx.t('official.poll-assistant.outcome.waiting', { summary: config.summary }) };
+  if (action !== 'status' && config.requesterIdentityId !== actorIdentityId) return { handled: true, text: ctx.t('official.poll-assistant.outcome.requesterOnly'), ...withMessageSlot('official.poll-assistant.outcome.requesterOnly') };
+  if (!run) return { handled: true, text: ctx.t('official.poll-assistant.outcome.waiting', { summary: config.summary }), ...withMessageSlot('official.poll-assistant.outcome.waiting') };
   if (action === 'cancel') await engine.workflowRuns.cancel(run.id, actorIdentityId);
   else if (action === 'retry') await engine.workflowExecutor?.retry(run.id, actorIdentityId);
   else if (action === 'review' && !run.leaseToken && !['completed', 'cancelled'].includes(run.status)) {
