@@ -1,3 +1,4 @@
+import { pollReadDeclaration } from './assistantReads';
 import type { PluginManifest } from '@wabs/plugin-sdk/manifest';
 import { POLL_HISTORY_OWNED_DATA_RESOURCE } from '@wabs/plugin-sdk/owned-data';
 import { pollAssistantConfigSchema, pollAssistantRuntimeConfigSchema } from './config';
@@ -41,8 +42,8 @@ export const pollAssistantManifest: PluginManifest = {
   pluginId: POLL_ASSISTANT_PLUGIN_ID,
   kind: 'managed_group',
   ...relationships,
-  version: '0.7.19',
-  coreApiRange: '^0.3.31',
+  version: '0.7.20',
+  coreApiRange: '^0.3.33',
   messageNamespace: 'official.poll-assistant',
   descriptionKey: 'official.poll-assistant.description',
   defaultMessages: pollAssistantMessages,
@@ -125,6 +126,7 @@ export const pollAssistantManifest: PluginManifest = {
   },
   eventSubscriptions: ['poll.vote', 'participant.change', 'plugin.job'],
   services: [
+    pollReadDeclaration,
     { serviceId: POLL_CREATE_ACTION_SERVICE, methods: [
       { name: 'describe', access: 'read' }, { name: 'prepare', access: 'read' },
       { name: 'execute', access: 'mutation' }, { name: 'inspect', access: 'read' }

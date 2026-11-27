@@ -1,3 +1,4 @@
+import { registerPollReads } from './assistantReads';
 import { migratePollTemplates } from './templateMigration';
 import { type BotPlugin } from './runtime';
 import {
@@ -25,7 +26,7 @@ export const pollAssistantPlugin: BotPlugin = {
     return registerPollAssistantTools(context);
   },
   registerServices(context) {
-    return registerPollAssistantServices(context);
+    return [registerPollReads(context), ...registerPollAssistantServices(context)];
   }
 };
 

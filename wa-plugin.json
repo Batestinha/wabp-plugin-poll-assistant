@@ -8,8 +8,8 @@
   },
   "description": "Runs WhatsApp polls for decisions, surveys and quantity totals. Organizers can send ballots to a group or privately, choose how results are shared, and trigger configured follow-up actions.",
   "kind": "managed_group",
-  "version": "0.7.19",
-  "coreApiRange": "^0.3.31",
+  "version": "0.7.20",
+  "coreApiRange": "^0.3.33",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
   "descriptionKey": "official.poll-assistant.description",
@@ -195,6 +195,21 @@
         {
           "name": "cancelPoll",
           "access": "mutation"
+        }
+      ]
+    },
+    {
+      "serviceId": "official.poll-assistant.assistant.v1",
+      "methods": [
+        {
+          "name": "polls",
+          "access": "read",
+          "assistantRead": {
+            "name": "official.poll-assistant.polls",
+            "descriptionKey": "official.poll-assistant.assistant.read.polls",
+            "allowScopeMembers": true,
+            "membership": "current_group"
+          }
         }
       ]
     }

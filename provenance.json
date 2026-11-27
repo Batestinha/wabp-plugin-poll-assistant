@@ -6,10 +6,10 @@
   "sourceTreeSha": "5b34c8a7e805e76382effab0c0074a599690b466",
   "extractedHistoryCommit": "da920beaf089d8e501f682b4bda6d9660ad6e060",
   "sdk": {
-    "version": "0.3.39",
-    "path": "vendor/wabs-plugin-sdk-0.3.39-0c9dec433b77.tgz",
-    "sha256": "0c9dec433b775072c3e639d73a9e81c99098c508aed8ac4721121322fb329a0b",
+    "version": "0.3.44",
+    "path": "vendor/wabs-plugin-sdk-0.3.44-8ba24f1b2bf7.tgz",
+    "sha256": "8ba24f1b2bf7aa34ded62feea12100eb3ae4140c496bf509a97d2f1cdea69a5e",
     "sourceDirectory": "packages/plugin-sdk",
-    "sourceCommit": "41ccc1ca46e14ddaecb213515ca8b4a0e1384abb"
+    "sourceCommit": "1162ddfce59175cab4a4ff49301d979e2f918ca8"
   }
 }

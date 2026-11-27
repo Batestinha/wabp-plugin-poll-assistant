@@ -3,6 +3,7 @@ import { type MessageCatalog } from '@wabs/plugin-sdk/i18n';
 import { pollOutcomeMessages } from './outcomeMessages';
 
 export const pollAssistantMessages: MessageCatalog = {
+  'official.poll-assistant.assistant.read.polls': 'List open group polls or public group polls created in a local date range. Polls are limited to the requester’s current group.',
   ...pollOutcomeMessages,
   ...pollTemplateDefaultMessages,
   'official.poll-assistant.description': 'Runs WhatsApp polls for decisions, surveys and quantity totals. Organizers can send ballots to a group or privately, choose how results are shared, and trigger configured follow-up actions.',

@@ -1,4 +1,5 @@
 {
+  "official.poll-assistant.assistant.read.polls": "Consulta as sondagens abertas do grupo ou as sondagens públicas criadas entre duas datas locais. A consulta é limitada ao teu grupo atual.",
   "official.poll-assistant.description": "Gere sondagens no WhatsApp para tomar decisões, recolher respostas e somar quantidades. Os organizadores podem enviar boletins para o grupo ou em privado, escolher como divulgar os resultados e acionar tarefas configuradas.",
   "official.poll-assistant.assistant.summary": "Sondagens duradouras e guiadas no WhatsApp com predefinições do operador, resultados agregados e gestão confirmada do ciclo de vida.",
   "official.poll-assistant.assistant.workflow.create": "Inicie o fluxo guiado de configuração de uma sondagem para Decidir, Medir ou Contabilizar, usando uma predefinição escolhida pelo operador quando disponível.",

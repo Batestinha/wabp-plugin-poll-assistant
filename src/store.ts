@@ -673,6 +673,31 @@ export function listPollsByChat(
   ).map(pollFromRow);
 }
 
+export function listPublicPollReadPage(db: PluginDatabase, input: {
+  scopeId: string; chatId: string; openOnly: boolean; from: string | undefined; until: string | undefined;
+  after?: { timestamp: string; id: string } | undefined; limit: number;
+}): StoredPoll[] {
+  const filters = ["chat_id = ?", "scope_id = ?", "COALESCE(json_extract(definition_json, '$.ballotDelivery'), 'group') = 'group'"];
+  const args: Array<string | number> = [input.chatId, input.scopeId];
+  if (input.openOnly) filters.push("status IN ('active', 'tie_pending')");
+  if (input.from) {
+    filters.push("created_at >= ?");
+    args.push(input.from);
+  }
+  if (input.until) {
+    filters.push("created_at < ?");
+    args.push(input.until);
+  }
+  if (input.after) {
+    filters.push("(created_at, id) < (?, ?)");
+    args.push(input.after.timestamp, input.after.id);
+  }
+  return db.all<PollRow>(
+    `SELECT * FROM polls WHERE ${filters.join(' AND ')} ORDER BY created_at DESC, id DESC LIMIT ?`,
+    ...args, input.limit
+  ).map(pollFromRow);
+}
+
 export function countActivePollsByChat(db: PluginDatabase, chatId: string): number {
   return db.get<{ count: number }>(
     `SELECT COUNT(*) AS count FROM polls
