@@ -1,6 +1,6 @@
 {
   "name": "@wabs/plugin-poll-assistant",
-  "version": "0.7.18",
+  "version": "0.7.19",
   "description": "Runs WhatsApp polls for decisions, surveys and quantity totals. Organizers can send ballots to a group or privately, choose how results are shared, and trigger configured follow-up actions.",
   "license": "MIT",
   "private": true,
