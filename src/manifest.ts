@@ -42,7 +42,7 @@ export const pollAssistantManifest: PluginManifest = {
   kind: 'managed_group',
   ...relationships,
   version: '0.7.19',
-  coreApiRange: '^0.3.27',
+  coreApiRange: '^0.3.31',
   messageNamespace: 'official.poll-assistant',
   descriptionKey: 'official.poll-assistant.description',
   defaultMessages: pollAssistantMessages,
