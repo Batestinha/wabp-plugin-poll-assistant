@@ -39,11 +39,12 @@ const { dependencies, integrations, memberSubscriptions } = require('../wa-plugi
 const relationships = { dependencies, integrations, memberSubscriptions };
 
 export const pollAssistantManifest: PluginManifest = {
+  ...{ operationCatalogVersion: require('../wa-plugin.json').operationCatalogVersion, operationPermissions: require('../wa-plugin.json').operationPermissions },
   pluginId: POLL_ASSISTANT_PLUGIN_ID,
   kind: 'managed_group',
   ...relationships,
-  version: '0.7.21',
-  coreApiRange: '^0.3.33',
+  version: '0.7.22',
+  coreApiRange: '^0.3.34',
   messageNamespace: 'official.poll-assistant',
   descriptionKey: 'official.poll-assistant.description',
   defaultMessages: pollAssistantMessages,

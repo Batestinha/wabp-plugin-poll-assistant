@@ -8,8 +8,8 @@
   },
   "description": "Runs WhatsApp polls for decisions, surveys and quantity totals. Organizers can send ballots to a group or privately, choose how results are shared, and trigger configured follow-up actions.",
   "kind": "managed_group",
-  "version": "0.7.21",
-  "coreApiRange": "^0.3.33",
+  "version": "0.7.22",
+  "coreApiRange": "^0.3.34",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
   "descriptionKey": "official.poll-assistant.description",
@@ -5440,5 +5440,28 @@
       "description": "Makes poll creation available through the assistant."
     }
   ],
-  "memberSubscriptions": []
+  "memberSubscriptions": [],
+  "operationCatalogVersion": 1,
+  "operationPermissions": [
+    {
+      "id": "official.poll-assistant.create",
+      "action": "polls.create",
+      "title": "Create polls",
+      "description": "Start polls in the managed scope.",
+      "titleKey": "official.poll-assistant.help.create",
+      "descriptionKey": "official.poll-assistant.help.create",
+      "defaultAccess": "explicit",
+      "allowScopeMembersConfigPath": "allowMemberCreation",
+      "requiresScopeMembership": true
+    },
+    {
+      "id": "official.poll-assistant.manage",
+      "action": "polls.manage",
+      "title": "Manage polls",
+      "description": "Manage polls under the poll resource policy.",
+      "titleKey": "official.poll-assistant.help.feature.title",
+      "descriptionKey": "official.poll-assistant.help.feature.summary",
+      "defaultAccess": "explicit"
+    }
+  ]
 }
