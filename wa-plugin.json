@@ -8,7 +8,7 @@
   },
   "description": "Runs WhatsApp polls for decisions, surveys and quantity totals. Organizers can send ballots to a group or privately, choose how results are shared, and trigger configured follow-up actions.",
   "kind": "managed_group",
-  "version": "0.7.20",
+  "version": "0.7.21",
   "coreApiRange": "^0.3.33",
   "entrypoint": "dist/index.js",
   "messageNamespace": "official.poll-assistant",
@@ -5439,5 +5439,6 @@
       "versionRange": "*",
       "description": "Makes poll creation available through the assistant."
     }
-  ]
+  ],
+  "memberSubscriptions": []
 }

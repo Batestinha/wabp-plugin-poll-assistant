@@ -35,14 +35,14 @@ import {
   POLL_ASSISTANT_LIFECYCLE_SERVICE_ID
 } from './lifecycleServiceApi';
 
-const { dependencies, integrations } = require('../wa-plugin.json');
-const relationships = { dependencies, integrations };
+const { dependencies, integrations, memberSubscriptions } = require('../wa-plugin.json');
+const relationships = { dependencies, integrations, memberSubscriptions };
 
 export const pollAssistantManifest: PluginManifest = {
   pluginId: POLL_ASSISTANT_PLUGIN_ID,
   kind: 'managed_group',
   ...relationships,
-  version: '0.7.20',
+  version: '0.7.21',
   coreApiRange: '^0.3.33',
   messageNamespace: 'official.poll-assistant',
   descriptionKey: 'official.poll-assistant.description',
